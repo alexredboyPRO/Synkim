@@ -7,25 +7,36 @@ const app = express();
 app.use(cors());
 
 const server = http.createServer(app);
+
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: "*", // allow all origins for testing
+    methods: ["GET", "POST"],
   },
 });
 
+// --- socket events ---
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
+  // Play event
   socket.on("play", (time) => {
     socket.broadcast.emit("play", time);
   });
 
+  // Pause event
   socket.on("pause", (time) => {
     socket.broadcast.emit("pause", time);
   });
 
+  // Sync event
   socket.on("sync", (time) => {
     socket.broadcast.emit("sync", time);
+  });
+
+  // Change video event
+  socket.on("changeVideo", (newId) => {
+    socket.broadcast.emit("changeVideo", newId);
   });
 
   socket.on("disconnect", () => {
@@ -33,10 +44,6 @@ io.on("connection", (socket) => {
   });
 });
 
+// --- start server ---
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-socket.on("changeVideo", (newId) => {
-  socket.broadcast.emit("changeVideo", newId);
-});
-
