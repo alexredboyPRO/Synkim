@@ -3,7 +3,7 @@ import { io } from "socket.io-client";
 
 const SOCKET_URL = "https://synkim.onrender.com/"; // use your tunnel link
 const ROOM = "room1";
-const SYNC_THRESHOLD = 2;
+const SYNC_THRESHOLD = 20;
 
 export default function App() {
   const socketRef = useRef(null);
