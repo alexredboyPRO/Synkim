@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 
-const SOCKET_URL = "https://floppy-rocks-hunt.loca.lt"; // use your tunnel link
+const SOCKET_URL = "https://synkim.onrender.com/"; // use your tunnel link
 const ROOM = "room1";
 const SYNC_THRESHOLD = 0.6;
 
