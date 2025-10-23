@@ -1,100 +1,109 @@
 import React, { useEffect, useRef } from "react";
-import { io } from "socket.io-client";
+import YouTube from "react-youtube";
+import io from "socket.io-client";
 
-const SOCKET_URL = "https://synkim.onrender.com/"; // use your tunnel link
-const ROOM = "room1";
-const SYNC_THRESHOLD = 6;
+// replace this URL with your Render backend URL
+const SOCKET_URL = "https://synkim.onrender.com";
 
-export default function App() {
+function App() {
   const socketRef = useRef(null);
   const playerRef = useRef(null);
-  const ready = useRef(false);
-  const syncing = useRef(false);
-  const lastSent = useRef(0);
+  const isRemoteAction = useRef(false);
 
   useEffect(() => {
-    socketRef.current = io(SOCKET_URL, { transports: ["websocket"] });
+    socketRef.current = io(SOCKET_URL);
 
-    socketRef.current.on("connect", () => {
-      console.log("socket connected", socketRef.current.id);
-      socketRef.current.emit("join_room", ROOM);
+    // --- Receive remote play event ---
+    socketRef.current.on("play", (time) => {
+      const player = playerRef.current;
+      if (!player) return;
+      const diff = Math.abs(player.getCurrentTime() - time);
+      if (diff > 0.5) {
+        isRemoteAction.current = true;
+        player.seekTo(time, true);
+      }
+      player.playVideo();
+      setTimeout(() => (isRemoteAction.current = false), 500);
     });
 
-    socketRef.current.on("sync_action", data => {
-      console.log("received sync_action", data);
-      if (!ready.current) return;
-      syncing.current = true;
-      const { action, time } = data;
-      if (typeof time === "number") {
-        try { playerRef.current.seekTo(time, true); } catch (e) {}
+    // --- Receive remote pause event ---
+    socketRef.current.on("pause", (time) => {
+      const player = playerRef.current;
+      if (!player) return;
+      const diff = Math.abs(player.getCurrentTime() - time);
+      if (diff > 0.5) {
+        isRemoteAction.current = true;
+        player.seekTo(time, true);
       }
-      if (action === "play") try { playerRef.current.playVideo(); } catch (e) {}
-      if (action === "pause") try { playerRef.current.pauseVideo(); } catch (e) {}
-      setTimeout(() => (syncing.current = false), 300);
+      player.pauseVideo();
+      setTimeout(() => (isRemoteAction.current = false), 500);
+    });
+
+    // --- Receive remote time sync event (every few seconds) ---
+    socketRef.current.on("sync", (time) => {
+      const player = playerRef.current;
+      if (!player) return;
+      const diff = Math.abs(player.getCurrentTime() - time);
+      if (diff > 1) {
+        isRemoteAction.current = true;
+        player.seekTo(time, true);
+        setTimeout(() => (isRemoteAction.current = false), 500);
+      }
     });
 
     return () => socketRef.current.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (window.YT && window.YT.Player) { initPlayer(); return; }
-    const tag = document.createElement("script");
-    tag.src = "https://www.youtube.com/iframe_api";
-    document.body.appendChild(tag);
-    window.onYouTubeIframeAPIReady = initPlayer;
-    // eslint-disable-next-line
-  }, []);
+  // --- Handle ready event ---
+  const onReady = (event) => {
+    playerRef.current = event.target;
 
-  function initPlayer() {
-    playerRef.current = new window.YT.Player("player", {
-      height: "360", width: "640",
-      videoId: "dQw4w9WgXcQ",
-      playerVars: { origin: window.location.origin },
-      events: {
-        onReady: () => {
-          ready.current = true;
-          console.log("YT ready");
-        },
-        onStateChange: event => {
-          if (!ready.current) return;
-          const state = event.data;
-          if (syncing.current) return;
-          const t = playerRef.current.getCurrentTime();
-          if (state === 1) { // playing
-            lastSent.current = t;
-            socketRef.current.emit("sync_action", { room: ROOM, action: "play", time: t });
-            console.log("emit play", t);
-          }
-          if (state === 2) { // paused
-            lastSent.current = t;
-            socketRef.current.emit("sync_action", { room: ROOM, action: "pause", time: t });
-            console.log("emit pause", t);
-          }
-        }
+    // emit current time periodically to help resync
+    setInterval(() => {
+      if (playerRef.current && !isRemoteAction.current) {
+        const t = playerRef.current.getCurrentTime();
+        socketRef.current.emit("sync", t);
       }
-    });
-  }
+    }, 3000);
+  };
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (!ready.current || syncing.current) return;
-      const state = playerRef.current?.getPlayerState();
-      if (state !== 1) return;
-      const cur = playerRef.current.getCurrentTime();
-      if (Math.abs(cur - lastSent.current) > SYNC_THRESHOLD) {
-        lastSent.current = cur;
-        socketRef.current.emit("sync_action", { room: ROOM, action: "seek", time: cur });
-        console.log("emit seek", cur);
-      }
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
+  // --- Local play and pause handlers ---
+  const onPlay = () => {
+    if (!isRemoteAction.current && playerRef.current) {
+      const t = playerRef.current.getCurrentTime();
+      socketRef.current.emit("play", t);
+    }
+  };
+
+  const onPause = () => {
+    if (!isRemoteAction.current && playerRef.current) {
+      const t = playerRef.current.getCurrentTime();
+      socketRef.current.emit("pause", t);
+    }
+  };
+
+  // --- Render YouTube player ---
+  const opts = {
+    height: "390",
+    width: "640",
+    playerVars: {
+      autoplay: 0,
+    },
+  };
 
   return (
-    <div style={{ padding: 12 }}>
-      <h3>YouTube Sync — demo</h3>
-      <div id="player" />
-      <p>Open two tabs. Play/pause/seek in one. Watch the other.</p>
+    <div className="App" style={{ textAlign: "center", marginTop: "40px" }}>
+      <h2>YouTube Sync Demo</h2>
+      <YouTube
+        videoId="dQw4w9WgXcQ" // change this video ID
+        opts={opts}
+        onReady={onReady}
+        onPlay={onPlay}
+        onPause={onPause}
+      />
+      <p>Open this page on two browsers or devices to test sync.</p>
     </div>
   );
 }
+
+export default App;
