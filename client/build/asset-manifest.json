@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/Synkim/static/css/main.e6c13ad2.css",
+    "main.js": "/Synkim/static/js/main.ff8aa932.js",
+    "static/js/453.eb570f4f.chunk.js": "/Synkim/static/js/453.eb570f4f.chunk.js",
+    "index.html": "/Synkim/index.html",
+    "main.e6c13ad2.css.map": "/Synkim/static/css/main.e6c13ad2.css.map",
+    "main.ff8aa932.js.map": "/Synkim/static/js/main.ff8aa932.js.map",
+    "453.eb570f4f.chunk.js.map": "/Synkim/static/js/453.eb570f4f.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.e6c13ad2.css",
+    "static/js/main.ff8aa932.js"
+  ]
+}
