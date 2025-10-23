@@ -3,7 +3,7 @@ import YouTube from "react-youtube";
 import io from "socket.io-client";
 
 // replace with your backend URL
-const SOCKET_URL = "https://your-app-name.onrender.com";
+const SOCKET_URL = "https://synkim.onrender.com";
 
 function App() {
   const socketRef = useRef(null);
