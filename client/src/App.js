@@ -48,7 +48,7 @@ export default function App() {
   function initPlayer() {
     playerRef.current = new window.YT.Player("player", {
       height: "360", width: "640",
-      videoId: "dQw4w9WgXcQ",
+      videoId: "d",
       playerVars: { origin: window.location.origin },
       events: {
         onReady: () => {
