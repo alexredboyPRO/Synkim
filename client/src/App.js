@@ -2,7 +2,19 @@ import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
 import YouTube from "react-youtube";
 
-const SOC
+const SOCKET_URL = "https://synkim.onrender.com";
+
+export default function App() {
+  const [player, setPlayer] = useState(null);
+  const socketRef = useRef();
+  const lastSync = useRef(0); // throttle syncs
+  const videoId = "dQw4w9WgXcQ"; // example
+
+  useEffect(() => {
+    socketRef.current = io(SOCKET_URL);
+
+    socketRef.current.on("play", (time) => {
+      if (!player) return;
       const diff = Math.abs(player.getCurrentTime() - time);
       if (diff > 0.5) player.seekTo(time, true);
       player.playVideo();
