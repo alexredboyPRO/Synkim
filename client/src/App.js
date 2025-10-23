@@ -1,19 +1,26 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import YouTube from "react-youtube";
 import io from "socket.io-client";
 
-// replace this URL with your Render backend URL
-const SOCKET_URL = "https://synkim.onrender.com";
+// replace with your backend URL
+const SOCKET_URL = "https://your-app-name.onrender.com";
 
 function App() {
   const socketRef = useRef(null);
   const playerRef = useRef(null);
   const isRemoteAction = useRef(false);
+  const [videoId, setVideoId] = useState("dQw4w9WgXcQ"); // default video
+  const [inputUrl, setInputUrl] = useState("");
+
+  // Extract video ID from a full YouTube URL
+  function extractVideoId(url) {
+    const match = url.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    return match ? match[1] : null;
+  }
 
   useEffect(() => {
     socketRef.current = io(SOCKET_URL);
 
-    // --- Receive remote play event ---
     socketRef.current.on("play", (time) => {
       const player = playerRef.current;
       if (!player) return;
@@ -26,7 +33,6 @@ function App() {
       setTimeout(() => (isRemoteAction.current = false), 500);
     });
 
-    // --- Receive remote pause event ---
     socketRef.current.on("pause", (time) => {
       const player = playerRef.current;
       if (!player) return;
@@ -39,7 +45,6 @@ function App() {
       setTimeout(() => (isRemoteAction.current = false), 500);
     });
 
-    // --- Receive remote time sync event (every few seconds) ---
     socketRef.current.on("sync", (time) => {
       const player = playerRef.current;
       if (!player) return;
@@ -51,14 +56,18 @@ function App() {
       }
     });
 
+    // handle video change
+    socketRef.current.on("changeVideo", (newId) => {
+      setVideoId(newId);
+    });
+
     return () => socketRef.current.disconnect();
   }, []);
 
-  // --- Handle ready event ---
   const onReady = (event) => {
     playerRef.current = event.target;
 
-    // emit current time periodically to help resync
+    // send current time every 3 seconds
     setInterval(() => {
       if (playerRef.current && !isRemoteAction.current) {
         const t = playerRef.current.getCurrentTime();
@@ -67,7 +76,6 @@ function App() {
     }, 3000);
   };
 
-  // --- Local play and pause handlers ---
   const onPlay = () => {
     if (!isRemoteAction.current && playerRef.current) {
       const t = playerRef.current.getCurrentTime();
@@ -82,26 +90,70 @@ function App() {
     }
   };
 
-  // --- Render YouTube player ---
+  const handleVideoChange = () => {
+    const newId = extractVideoId(inputUrl);
+    if (newId) {
+      setVideoId(newId);
+      socketRef.current.emit("changeVideo", newId);
+    } else {
+      alert("Invalid YouTube link.");
+    }
+  };
+
   const opts = {
     height: "390",
     width: "640",
-    playerVars: {
-      autoplay: 0,
-    },
+    playerVars: { autoplay: 0 },
   };
 
   return (
-    <div className="App" style={{ textAlign: "center", marginTop: "40px" }}>
-      <h2>YouTube Sync Demo</h2>
+    <div style={{ textAlign: "center", padding: "30px" }}>
+      <h1 style={{ fontSize: "36px", fontWeight: "bold", marginBottom: "20px" }}>
+        SYNKIM
+      </h1>
+
+      <div style={{ marginBottom: "20px" }}>
+        <input
+          type="text"
+          value={inputUrl}
+          onChange={(e) => setInputUrl(e.target.value)}
+          placeholder="Paste YouTube link here"
+          style={{
+            width: "400px",
+            padding: "8px",
+            fontSize: "16px",
+            borderRadius: "8px",
+            border: "1px solid #ccc",
+            marginRight: "10px",
+          }}
+        />
+        <button
+          onClick={handleVideoChange}
+          style={{
+            padding: "8px 16px",
+            fontSize: "16px",
+            borderRadius: "8px",
+            backgroundColor: "#007BFF",
+            color: "white",
+            border: "none",
+            cursor: "pointer",
+          }}
+        >
+          Load Video
+        </button>
+      </div>
+
       <YouTube
-        videoId="dQw4w9WgXcQ" // change this video ID
+        videoId={videoId}
         opts={opts}
         onReady={onReady}
         onPlay={onPlay}
         onPause={onPause}
       />
-      <p>Open this page on two browsers or devices to test sync.</p>
+
+      <p style={{ marginTop: "20px", color: "#555" }}>
+        Open on two devices to test live sync.
+      </p>
     </div>
   );
 }
