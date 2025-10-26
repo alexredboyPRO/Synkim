@@ -9,6 +9,7 @@ function App() {
   const socketRef = useRef(null);
   const playerRef = useRef(null);
   const isRemoteAction = useRef(false);
+  const lastSyncTime = useRef(0);
   const [videoId, setVideoId] = useState("dQw4w9WgXcQ"); // default video
   const [inputUrl, setInputUrl] = useState("");
 
@@ -24,35 +25,59 @@ function App() {
     socketRef.current.on("play", (time) => {
       const player = playerRef.current;
       if (!player) return;
-      const diff = Math.abs(player.getCurrentTime() - time);
-      if (diff > 0.5) {
+      
+      // Only sync if difference is significant (3+ seconds)
+      const currentTime = player.getCurrentTime();
+      const diff = Math.abs(currentTime - time);
+      
+      if (diff > 3) {
         isRemoteAction.current = true;
         player.seekTo(time, true);
+        console.log(`Syncing to ${time} (difference: ${diff.toFixed(2)}s)`);
       }
+      
       player.playVideo();
-      setTimeout(() => (isRemoteAction.current = false), 500);
+      setTimeout(() => (isRemoteAction.current = false), 1000);
     });
 
     socketRef.current.on("pause", (time) => {
       const player = playerRef.current;
       if (!player) return;
-      const diff = Math.abs(player.getCurrentTime() - time);
-      if (diff > 0.5) {
+      
+      // Only sync if difference is significant (3+ seconds)
+      const currentTime = player.getCurrentTime();
+      const diff = Math.abs(currentTime - time);
+      
+      if (diff > 3) {
         isRemoteAction.current = true;
         player.seekTo(time, true);
+        console.log(`Syncing to ${time} (difference: ${diff.toFixed(2)}s)`);
       }
+      
       player.pauseVideo();
-      setTimeout(() => (isRemoteAction.current = false), 500);
+      setTimeout(() => (isRemoteAction.current = false), 1000);
     });
 
     socketRef.current.on("sync", (time) => {
       const player = playerRef.current;
       if (!player) return;
-      const diff = Math.abs(player.getCurrentTime() - time);
-      if (diff > 1) {
+      
+      // Prevent rapid successive syncs
+      const now = Date.now();
+      if (now - lastSyncTime.current < 5000) { // 5 second cooldown
+        return;
+      }
+      
+      const currentTime = player.getCurrentTime();
+      const diff = Math.abs(currentTime - time);
+      
+      // Only sync if difference is substantial (5+ seconds)
+      if (diff > 5) {
         isRemoteAction.current = true;
         player.seekTo(time, true);
-        setTimeout(() => (isRemoteAction.current = false), 500);
+        lastSyncTime.current = now;
+        console.log(`Periodic sync to ${time} (difference: ${diff.toFixed(2)}s)`);
+        setTimeout(() => (isRemoteAction.current = false), 1000);
       }
     });
 
@@ -67,13 +92,13 @@ function App() {
   const onReady = (event) => {
     playerRef.current = event.target;
 
-    // send current time every 3 seconds
+    // send current time less frequently (every 10 seconds)
     setInterval(() => {
       if (playerRef.current && !isRemoteAction.current) {
         const t = playerRef.current.getCurrentTime();
         socketRef.current.emit("sync", t);
       }
-    }, 3000);
+    }, 10000); // Increased from 3 to 10 seconds
   };
 
   const onPlay = () => {
