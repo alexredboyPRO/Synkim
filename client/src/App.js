@@ -13,9 +13,12 @@ function App() {
   const [videoId, setVideoId] = useState("dQw4w9WgXcQ"); // default video
   const [inputUrl, setInputUrl] = useState("");
   const [isPlaylist, setIsPlaylist] = useState(false);
+  const [playerKey, setPlayerKey] = useState(0); // Key to force re-render
 
   // Extract video ID or playlist ID from a full YouTube URL
   function extractYouTubeId(url) {
+    if (!url) return null;
+    
     // Regular video patterns
     const videoPatterns = [
       /(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/, // Standard video URLs
@@ -114,12 +117,14 @@ function App() {
     socketRef.current.on("changeVideo", (newId) => {
       setVideoId(newId);
       setIsPlaylist(false);
+      setPlayerKey(prev => prev + 1); // Force re-render
     });
 
     // handle playlist change
     socketRef.current.on("changePlaylist", (newPlaylistId) => {
       setVideoId(newPlaylistId);
       setIsPlaylist(true);
+      setPlayerKey(prev => prev + 1); // Force re-render
     });
 
     return () => socketRef.current.disconnect();
@@ -134,7 +139,7 @@ function App() {
         const t = playerRef.current.getCurrentTime();
         socketRef.current.emit("sync", t);
       }
-    }, 10000); // Increased from 3 to 10 seconds
+    }, 10000);
   };
 
   const onPlay = () => {
@@ -149,6 +154,15 @@ function App() {
       const t = playerRef.current.getCurrentTime();
       socketRef.current.emit("pause", t);
     }
+  };
+
+  const onStateChange = (event) => {
+    // Handle YouTube player state changes
+    console.log("YouTube Player State:", event.data);
+  };
+
+  const onError = (event) => {
+    console.error("YouTube Player Error:", event.data);
   };
 
   const handleVideoChange = () => {
@@ -168,13 +182,29 @@ function App() {
     }
   };
 
-  const opts = {
-    height: "390",
-    width: "640",
-    playerVars: { 
-      autoplay: 0,
-      ...(isPlaylist && { list: videoId, listType: 'playlist' })
-    },
+  // Different configuration for videos vs playlists
+  const getPlayerOpts = () => {
+    if (isPlaylist) {
+      return {
+        height: "390",
+        width: "640",
+        playerVars: {
+          autoplay: 0,
+          list: videoId,
+          listType: 'playlist',
+          origin: window.location.origin
+        },
+      };
+    } else {
+      return {
+        height: "390",
+        width: "640",
+        playerVars: { 
+          autoplay: 0,
+          origin: window.location.origin
+        },
+      };
+    }
   };
 
   return (
@@ -215,11 +245,14 @@ function App() {
       </div>
 
       <YouTube
+        key={playerKey} // Force re-render when video/playlist changes
         videoId={isPlaylist ? undefined : videoId}
-        opts={opts}
+        opts={getPlayerOpts()}
         onReady={onReady}
         onPlay={onPlay}
         onPause={onPause}
+        onStateChange={onStateChange}
+        onError={onError}
       />
 
       <p style={{ marginTop: "20px", color: "#555" }}>
