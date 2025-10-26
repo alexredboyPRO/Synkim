@@ -12,11 +12,40 @@ function App() {
   const lastSyncTime = useRef(0);
   const [videoId, setVideoId] = useState("dQw4w9WgXcQ"); // default video
   const [inputUrl, setInputUrl] = useState("");
+  const [isPlaylist, setIsPlaylist] = useState(false);
 
-  // Extract video ID from a full YouTube URL
-  function extractVideoId(url) {
-    const match = url.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-    return match ? match[1] : null;
+  // Extract video ID or playlist ID from a full YouTube URL
+  function extractYouTubeId(url) {
+    // Regular video patterns
+    const videoPatterns = [
+      /(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/, // Standard video URLs
+      /embed\/([a-zA-Z0-9_-]{11})/ // Embed URLs
+    ];
+
+    // Playlist pattern
+    const playlistPattern = /[&?]list=([a-zA-Z0-9_-]+)/;
+
+    // Check for playlist first
+    const playlistMatch = url.match(playlistPattern);
+    if (playlistMatch) {
+      return {
+        type: "playlist",
+        id: playlistMatch[1]
+      };
+    }
+
+    // Check for video
+    for (const pattern of videoPatterns) {
+      const match = url.match(pattern);
+      if (match) {
+        return {
+          type: "video",
+          id: match[1]
+        };
+      }
+    }
+
+    return null;
   }
 
   useEffect(() => {
@@ -84,6 +113,13 @@ function App() {
     // handle video change
     socketRef.current.on("changeVideo", (newId) => {
       setVideoId(newId);
+      setIsPlaylist(false);
+    });
+
+    // handle playlist change
+    socketRef.current.on("changePlaylist", (newPlaylistId) => {
+      setVideoId(newPlaylistId);
+      setIsPlaylist(true);
     });
 
     return () => socketRef.current.disconnect();
@@ -116,19 +152,29 @@ function App() {
   };
 
   const handleVideoChange = () => {
-    const newId = extractVideoId(inputUrl);
-    if (newId) {
-      setVideoId(newId);
-      socketRef.current.emit("changeVideo", newId);
+    const result = extractYouTubeId(inputUrl);
+    if (result) {
+      if (result.type === "playlist") {
+        setVideoId(result.id);
+        setIsPlaylist(true);
+        socketRef.current.emit("changePlaylist", result.id);
+      } else {
+        setVideoId(result.id);
+        setIsPlaylist(false);
+        socketRef.current.emit("changeVideo", result.id);
+      }
     } else {
-      alert("Invalid YouTube link.");
+      alert("Invalid YouTube link. Please provide a valid YouTube video or playlist URL.");
     }
   };
 
   const opts = {
     height: "390",
     width: "640",
-    playerVars: { autoplay: 0 },
+    playerVars: { 
+      autoplay: 0,
+      ...(isPlaylist && { list: videoId, listType: 'playlist' })
+    },
   };
 
   return (
@@ -142,7 +188,7 @@ function App() {
           type="text"
           value={inputUrl}
           onChange={(e) => setInputUrl(e.target.value)}
-          placeholder="Paste YouTube link here"
+          placeholder="Paste YouTube video or playlist link here"
           style={{
             width: "400px",
             padding: "8px",
@@ -164,12 +210,12 @@ function App() {
             cursor: "pointer",
           }}
         >
-          Load Video
+          Load {isPlaylist ? "Playlist" : "Video"}
         </button>
       </div>
 
       <YouTube
-        videoId={videoId}
+        videoId={isPlaylist ? undefined : videoId}
         opts={opts}
         onReady={onReady}
         onPlay={onPlay}
@@ -177,7 +223,7 @@ function App() {
       />
 
       <p style={{ marginTop: "20px", color: "#555" }}>
-        Open on two devices to test live sync.
+        {isPlaylist ? "Now playing playlist" : "Now playing video"} - Open on two devices to test live sync.
       </p>
     </div>
   );

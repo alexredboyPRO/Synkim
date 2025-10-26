@@ -39,6 +39,11 @@ io.on("connection", (socket) => {
     socket.broadcast.emit("changeVideo", newId);
   });
 
+  // Change playlist event
+  socket.on("changePlaylist", (newPlaylistId) => {
+    socket.broadcast.emit("changePlaylist", newPlaylistId);
+  });
+
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
   });
