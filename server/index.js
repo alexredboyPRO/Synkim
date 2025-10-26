@@ -10,36 +10,30 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*", // allow all origins for testing
+    origin: "*",
     methods: ["GET", "POST"],
   },
 });
 
-// --- socket events ---
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  // Play event
-  socket.on("play", (time) => {
-    socket.broadcast.emit("play", time);
+  socket.on("play", (data) => {
+    socket.broadcast.emit("play", data);
   });
 
-  // Pause event
-  socket.on("pause", (time) => {
-    socket.broadcast.emit("pause", time);
+  socket.on("pause", (data) => {
+    socket.broadcast.emit("pause", data);
   });
 
-  // Sync event
-  socket.on("sync", (time) => {
-    socket.broadcast.emit("sync", time);
+  socket.on("sync", (data) => {
+    socket.broadcast.emit("sync", data);
   });
 
-  // Change video event
   socket.on("changeVideo", (newId) => {
     socket.broadcast.emit("changeVideo", newId);
   });
 
-  // Change playlist event
   socket.on("changePlaylist", (newPlaylistId) => {
     socket.broadcast.emit("changePlaylist", newPlaylistId);
   });
@@ -49,6 +43,5 @@ io.on("connection", (socket) => {
   });
 });
 
-// --- start server ---
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

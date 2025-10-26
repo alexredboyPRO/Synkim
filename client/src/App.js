@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import YouTube from "react-youtube";
 import io from "socket.io-client";
 
-// replace with your backend URL
 const SOCKET_URL = "https://synkim.onrender.com";
 
 function App() {
@@ -10,25 +9,23 @@ function App() {
   const playerRef = useRef(null);
   const isRemoteAction = useRef(false);
   const lastSyncTime = useRef(0);
-  const [videoId, setVideoId] = useState("dQw4w9WgXcQ"); // default video
+  const [videoId, setVideoId] = useState("dQw4w9WgXcQ");
   const [inputUrl, setInputUrl] = useState("");
   const [isPlaylist, setIsPlaylist] = useState(false);
-  const [playerKey, setPlayerKey] = useState(0); // Key to force re-render
+  const [playerKey, setPlayerKey] = useState(0);
+  const [playlistId, setPlaylistId] = useState("");
 
-  // Extract video ID or playlist ID from a full YouTube URL
   function extractYouTubeId(url) {
     if (!url) return null;
     
-    // Regular video patterns
     const videoPatterns = [
-      /(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/, // Standard video URLs
-      /embed\/([a-zA-Z0-9_-]{11})/ // Embed URLs
+      /(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+      /embed\/([a-zA-Z0-9_-]{11})/
     ];
 
-    // Playlist pattern
     const playlistPattern = /[&?]list=([a-zA-Z0-9_-]+)/;
 
-    // Check for playlist first
+    // Check for playlist
     const playlistMatch = url.match(playlistPattern);
     if (playlistMatch) {
       return {
@@ -54,90 +51,141 @@ function App() {
   useEffect(() => {
     socketRef.current = io(SOCKET_URL);
 
-    socketRef.current.on("play", (time) => {
+    socketRef.current.on("play", (data) => {
       const player = playerRef.current;
       if (!player) return;
       
-      // Only sync if difference is significant (3+ seconds)
+      const { time, isPlaylist: remoteIsPlaylist, mediaId } = data;
+      
+      // Handle playlist sync
+      if (remoteIsPlaylist && mediaId !== playlistId) {
+        setPlaylistId(mediaId);
+        setIsPlaylist(true);
+        setPlayerKey(prev => prev + 1);
+        return;
+      }
+      
+      // Handle video sync
+      if (!remoteIsPlaylist && mediaId !== videoId) {
+        setVideoId(mediaId);
+        setIsPlaylist(false);
+        setPlayerKey(prev => prev + 1);
+        return;
+      }
+      
+      // Sync time
       const currentTime = player.getCurrentTime();
       const diff = Math.abs(currentTime - time);
       
       if (diff > 3) {
         isRemoteAction.current = true;
         player.seekTo(time, true);
-        console.log(`Syncing to ${time} (difference: ${diff.toFixed(2)}s)`);
       }
       
       player.playVideo();
       setTimeout(() => (isRemoteAction.current = false), 1000);
     });
 
-    socketRef.current.on("pause", (time) => {
+    socketRef.current.on("pause", (data) => {
       const player = playerRef.current;
       if (!player) return;
       
-      // Only sync if difference is significant (3+ seconds)
-      const currentTime = player.getCurrentTime();
-      const diff = Math.abs(currentTime - time);
+      const { time, isPlaylist: remoteIsPlaylist, mediaId } = data;
       
-      if (diff > 3) {
-        isRemoteAction.current = true;
-        player.seekTo(time, true);
-        console.log(`Syncing to ${time} (difference: ${diff.toFixed(2)}s)`);
-      }
-      
-      player.pauseVideo();
-      setTimeout(() => (isRemoteAction.current = false), 1000);
-    });
-
-    socketRef.current.on("sync", (time) => {
-      const player = playerRef.current;
-      if (!player) return;
-      
-      // Prevent rapid successive syncs
-      const now = Date.now();
-      if (now - lastSyncTime.current < 5000) { // 5 second cooldown
+      // Handle media type changes
+      if (remoteIsPlaylist !== isPlaylist || mediaId !== (isPlaylist ? playlistId : videoId)) {
+        if (remoteIsPlaylist) {
+          setPlaylistId(mediaId);
+          setIsPlaylist(true);
+        } else {
+          setVideoId(mediaId);
+          setIsPlaylist(false);
+        }
+        setPlayerKey(prev => prev + 1);
         return;
       }
       
       const currentTime = player.getCurrentTime();
       const diff = Math.abs(currentTime - time);
       
-      // Only sync if difference is substantial (5+ seconds)
+      if (diff > 3) {
+        isRemoteAction.current = true;
+        player.seekTo(time, true);
+      }
+      
+      player.pauseVideo();
+      setTimeout(() => (isRemoteAction.current = false), 1000);
+    });
+
+    socketRef.current.on("sync", (data) => {
+      const player = playerRef.current;
+      if (!player) return;
+      
+      const now = Date.now();
+      if (now - lastSyncTime.current < 5000) {
+        return;
+      }
+      
+      const { time, isPlaylist: remoteIsPlaylist, mediaId } = data;
+      
+      // Don't sync if media type doesn't match
+      if (remoteIsPlaylist !== isPlaylist || mediaId !== (isPlaylist ? playlistId : videoId)) {
+        return;
+      }
+      
+      const currentTime = player.getCurrentTime();
+      const diff = Math.abs(currentTime - time);
+      
       if (diff > 5) {
         isRemoteAction.current = true;
         player.seekTo(time, true);
         lastSyncTime.current = now;
-        console.log(`Periodic sync to ${time} (difference: ${diff.toFixed(2)}s)`);
         setTimeout(() => (isRemoteAction.current = false), 1000);
       }
     });
 
-    // handle video change
     socketRef.current.on("changeVideo", (newId) => {
       setVideoId(newId);
       setIsPlaylist(false);
-      setPlayerKey(prev => prev + 1); // Force re-render
+      setPlayerKey(prev => prev + 1);
     });
 
-    // handle playlist change
     socketRef.current.on("changePlaylist", (newPlaylistId) => {
-      setVideoId(newPlaylistId);
+      setPlaylistId(newPlaylistId);
       setIsPlaylist(true);
-      setPlayerKey(prev => prev + 1); // Force re-render
+      setPlayerKey(prev => prev + 1);
     });
 
     return () => socketRef.current.disconnect();
-  }, []);
+  }, [isPlaylist, playlistId, videoId]);
 
   const onReady = (event) => {
     playerRef.current = event.target;
+    console.log("Player ready:", isPlaylist ? `Playlist: ${playlistId}` : `Video: ${videoId}`);
 
-    // send current time less frequently (every 10 seconds)
+    // For playlists, ensure they start properly
+    if (isPlaylist && playerRef.current && playerRef.current.playVideo) {
+      setTimeout(() => {
+        if (playerRef.current) {
+          playerRef.current.stopVideo(); // Stop first
+          setTimeout(() => {
+            if (playerRef.current) {
+              playerRef.current.playVideo(); // Then play
+            }
+          }, 100);
+        }
+      }, 1000);
+    }
+
     setInterval(() => {
       if (playerRef.current && !isRemoteAction.current) {
         const t = playerRef.current.getCurrentTime();
-        socketRef.current.emit("sync", t);
+        const mediaData = {
+          time: t,
+          isPlaylist: isPlaylist,
+          mediaId: isPlaylist ? playlistId : videoId
+        };
+        socketRef.current.emit("sync", mediaData);
       }
     }, 10000);
   };
@@ -145,31 +193,61 @@ function App() {
   const onPlay = () => {
     if (!isRemoteAction.current && playerRef.current) {
       const t = playerRef.current.getCurrentTime();
-      socketRef.current.emit("play", t);
+      const mediaData = {
+        time: t,
+        isPlaylist: isPlaylist,
+        mediaId: isPlaylist ? playlistId : videoId
+      };
+      socketRef.current.emit("play", mediaData);
     }
   };
 
   const onPause = () => {
     if (!isRemoteAction.current && playerRef.current) {
       const t = playerRef.current.getCurrentTime();
-      socketRef.current.emit("pause", t);
+      const mediaData = {
+        time: t,
+        isPlaylist: isPlaylist,
+        mediaId: isPlaylist ? playlistId : videoId
+      };
+      socketRef.current.emit("pause", mediaData);
     }
   };
 
   const onStateChange = (event) => {
-    // Handle YouTube player state changes
-    console.log("YouTube Player State:", event.data);
+    console.log("Player state:", event.data);
+    // If player is cued but not playing for playlists, try to play
+    if (isPlaylist && event.data === 5) { // 5 = video cued
+      setTimeout(() => {
+        if (playerRef.current && playerRef.current.playVideo) {
+          playerRef.current.playVideo();
+        }
+      }, 500);
+    }
   };
 
   const onError = (event) => {
-    console.error("YouTube Player Error:", event.data);
+    console.error("Player error:", event.data);
+    // If there's an error with playlist, try reloading
+    if (isPlaylist && playerRef.current) {
+      setTimeout(() => {
+        if (playerRef.current) {
+          playerRef.current.stopVideo();
+          setTimeout(() => {
+            if (playerRef.current) {
+              playerRef.current.playVideo();
+            }
+          }, 100);
+        }
+      }, 1000);
+    }
   };
 
   const handleVideoChange = () => {
     const result = extractYouTubeId(inputUrl);
     if (result) {
       if (result.type === "playlist") {
-        setVideoId(result.id);
+        setPlaylistId(result.id);
         setIsPlaylist(true);
         socketRef.current.emit("changePlaylist", result.id);
       } else {
@@ -177,33 +255,36 @@ function App() {
         setIsPlaylist(false);
         socketRef.current.emit("changeVideo", result.id);
       }
+      setPlayerKey(prev => prev + 1);
     } else {
       alert("Invalid YouTube link. Please provide a valid YouTube video or playlist URL.");
     }
   };
 
-  // Different configuration for videos vs playlists
   const getPlayerOpts = () => {
+    const baseOpts = {
+      height: "390",
+      width: "640",
+      playerVars: {
+        autoplay: 0,
+        origin: window.location.origin,
+        enablejsapi: 1,
+        widget_referrer: window.location.origin
+      },
+    };
+
     if (isPlaylist) {
       return {
-        height: "390",
-        width: "640",
+        ...baseOpts,
         playerVars: {
-          autoplay: 0,
-          list: videoId,
+          ...baseOpts.playerVars,
+          list: playlistId,
           listType: 'playlist',
-          origin: window.location.origin
-        },
+          rel: 0
+        }
       };
     } else {
-      return {
-        height: "390",
-        width: "640",
-        playerVars: { 
-          autoplay: 0,
-          origin: window.location.origin
-        },
-      };
+      return baseOpts;
     }
   };
 
@@ -244,19 +325,31 @@ function App() {
         </button>
       </div>
 
-      <YouTube
-        key={playerKey} // Force re-render when video/playlist changes
-        videoId={isPlaylist ? undefined : videoId}
-        opts={getPlayerOpts()}
-        onReady={onReady}
-        onPlay={onPlay}
-        onPause={onPause}
-        onStateChange={onStateChange}
-        onError={onError}
-      />
+      {isPlaylist ? (
+        <YouTube
+          key={playerKey}
+          opts={getPlayerOpts()}
+          onReady={onReady}
+          onPlay={onPlay}
+          onPause={onPause}
+          onStateChange={onStateChange}
+          onError={onError}
+        />
+      ) : (
+        <YouTube
+          key={playerKey}
+          videoId={videoId}
+          opts={getPlayerOpts()}
+          onReady={onReady}
+          onPlay={onPlay}
+          onPause={onPause}
+          onStateChange={onStateChange}
+          onError={onError}
+        />
+      )}
 
       <p style={{ marginTop: "20px", color: "#555" }}>
-        {isPlaylist ? "Now playing playlist" : "Now playing video"} - Open on two devices to test live sync.
+        {isPlaylist ? `Playing playlist: ${playlistId}` : `Playing video: ${videoId}`}
       </p>
     </div>
   );
