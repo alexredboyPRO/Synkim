@@ -108,7 +108,7 @@ function App() {
     return unsubscribe;
   }, []);
 
-  // Socket setup - SIMPLE AND CLEAN
+  // Socket setup - ALWAYS ACTIVE SYNC
   useEffect(() => {
     if (!user) return;
 
@@ -119,15 +119,15 @@ function App() {
       if (!player) return;
       
       isRemoteAction.current = true;
-      player.playVideo();
       
-      // Small sync if difference is noticeable
+      // ALWAYS check time difference and sync if needed
       const currentTime = player.getCurrentTime();
-      if (Math.abs(currentTime - time) > 2) {
+      if (Math.abs(currentTime - time) > 0.5) {
         player.seekTo(time, true);
       }
       
-      setTimeout(() => (isRemoteAction.current = false), 500);
+      player.playVideo();
+      setTimeout(() => (isRemoteAction.current = false), 300);
     });
 
     socketRef.current.on("pause", (time) => {
@@ -135,27 +135,27 @@ function App() {
       if (!player) return;
       
       isRemoteAction.current = true;
-      player.pauseVideo();
       
-      // Small sync if difference is noticeable
+      // ALWAYS check time difference and sync if needed
       const currentTime = player.getCurrentTime();
-      if (Math.abs(currentTime - time) > 2) {
+      if (Math.abs(currentTime - time) > 0.5) {
         player.seekTo(time, true);
       }
       
-      setTimeout(() => (isRemoteAction.current = false), 500);
+      player.pauseVideo();
+      setTimeout(() => (isRemoteAction.current = false), 300);
     });
 
     socketRef.current.on("sync", (time) => {
       const player = playerRef.current;
       if (!player) return;
       
-      // Only sync if significantly out of sync
+      // ALWAYS sync if out of sync (small threshold)
       const currentTime = player.getCurrentTime();
-      if (Math.abs(currentTime - time) > 5) {
+      if (Math.abs(currentTime - time) > 1) {
         isRemoteAction.current = true;
         player.seekTo(time, true);
-        setTimeout(() => (isRemoteAction.current = false), 500);
+        setTimeout(() => (isRemoteAction.current = false), 300);
       }
     });
 
@@ -175,13 +175,13 @@ function App() {
   const onReady = (event) => {
     playerRef.current = event.target;
 
-    // Simple sync every 10 seconds
+    // Continuous sync every 3 seconds
     setInterval(() => {
       if (playerRef.current && !isRemoteAction.current) {
         const t = playerRef.current.getCurrentTime();
         socketRef.current.emit("sync", t);
       }
-    }, 10000);
+    }, 3000);
   };
 
   const onPlay = () => {
