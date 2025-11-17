@@ -15,166 +15,132 @@ const io = new Server(server, {
   },
 });
 
-// Store room states
-const roomStates = new Map();
-const userRooms = new Map();
-
-// Default room state
-const defaultRoomState = {
-  mediaType: "video", // 'video' or 'playlist'
-  mediaId: "dQw4w9WgXcQ", // default video
-  isPlaying: false,
-  currentTime: 0,
-  lastUpdate: Date.now()
-};
+// Store room state
+const rooms = new Map();
 
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  // Join default room
-  const roomId = "default";
-  socket.join(roomId);
-  userRooms.set(socket.id, roomId);
+  let currentRoom = "default";
 
-  // Initialize room if it doesn't exist
-  if (!roomStates.has(roomId)) {
-    roomStates.set(roomId, { ...defaultRoomState });
-  }
-
-  const roomState = roomStates.get(roomId);
-
-  // Send current state to new user
-  socket.emit("stateUpdate", {
-    mediaType: roomState.mediaType,
-    mediaId: roomState.mediaId,
-    isPlaying: roomState.isPlaying,
-    currentTime: roomState.currentTime,
-    isNewUser: true
+  // Join room and get current state
+  socket.on("joinRoom", (roomId = "default") => {
+    currentRoom = roomId;
+    socket.join(roomId);
+    
+    // Initialize room if it doesn't exist
+    if (!rooms.has(roomId)) {
+      rooms.set(roomId, {
+        videoId: "dQw4w9WgXcQ",
+        playlistId: "",
+        isPlaylist: false,
+        isPlaying: false,
+        currentTime: 0,
+        lastUpdate: Date.now()
+      });
+    }
+    
+    const room = rooms.get(roomId);
+    // Send current room state to the new user
+    socket.emit("roomState", room);
+    console.log(`User ${socket.id} joined room: ${roomId}`, room);
   });
 
-  console.log(`User ${socket.id} joined room ${roomId}`, roomState);
-
-  // Play event - update room state and broadcast
+  // Play event with room awareness
   socket.on("play", (data) => {
-    const { time, isPlaylist, mediaId } = data;
-    const roomId = userRooms.get(socket.id);
-    const roomState = roomStates.get(roomId);
-
-    // Update room state
-    roomState.mediaType = isPlaylist ? "playlist" : "video";
-    roomState.mediaId = mediaId;
-    roomState.isPlaying = true;
-    roomState.currentTime = time;
-    roomState.lastUpdate = Date.now();
-
-    // Broadcast to all other users in the room
-    socket.to(roomId).emit("play", {
-      time: time,
-      isPlaylist: isPlaylist,
-      mediaId: mediaId,
-      fromServer: true
-    });
-
-    console.log(`Room ${roomId} play:`, roomState);
+    const room = rooms.get(currentRoom);
+    if (room) {
+      room.isPlaying = true;
+      room.currentTime = data.time;
+      room.lastUpdate = Date.now();
+      
+      // Broadcast to others in the same room
+      socket.to(currentRoom).emit("play", data);
+      console.log(`Play in room ${currentRoom} at time ${data.time}`);
+    }
   });
 
-  // Pause event
+  // Pause event with room awareness
   socket.on("pause", (data) => {
-    const { time, isPlaylist, mediaId } = data;
-    const roomId = userRooms.get(socket.id);
-    const roomState = roomStates.get(roomId);
-
-    roomState.mediaType = isPlaylist ? "playlist" : "video";
-    roomState.mediaId = mediaId;
-    roomState.isPlaying = false;
-    roomState.currentTime = time;
-    roomState.lastUpdate = Date.now();
-
-    socket.to(roomId).emit("pause", {
-      time: time,
-      isPlaylist: isPlaylist,
-      mediaId: mediaId,
-      fromServer: true
-    });
-
-    console.log(`Room ${roomId} pause:`, roomState);
+    const room = rooms.get(currentRoom);
+    if (room) {
+      room.isPlaying = false;
+      room.currentTime = data.time;
+      room.lastUpdate = Date.now();
+      
+      socket.to(currentRoom).emit("pause", data);
+      console.log(`Pause in room ${currentRoom} at time ${data.time}`);
+    }
   });
 
-  // Sync event (periodic time updates)
+  // Sync event - only update time, don't change play state
   socket.on("sync", (data) => {
-    const { time, isPlaylist, mediaId } = data;
-    const roomId = userRooms.get(socket.id);
-    const roomState = roomStates.get(roomId);
-
-    // Only update if this is the most recent sync (within 2 seconds)
-    if (Date.now() - roomState.lastUpdate > 2000) {
-      roomState.currentTime = time;
-      roomState.lastUpdate = Date.now();
+    const room = rooms.get(currentRoom);
+    if (room) {
+      room.currentTime = data.time;
+      room.lastUpdate = Date.now();
+      
+      socket.to(currentRoom).emit("sync", data);
     }
   });
 
   // Change video event
-  socket.on("changeVideo", (newId) => {
-    const roomId = userRooms.get(socket.id);
-    const roomState = roomStates.get(roomId);
-
-    roomState.mediaType = "video";
-    roomState.mediaId = newId;
-    roomState.isPlaying = false;
-    roomState.currentTime = 0;
-    roomState.lastUpdate = Date.now();
-
-    socket.to(roomId).emit("changeVideo", newId);
-    console.log(`Room ${roomId} video changed to:`, newId);
+  socket.on("changeVideo", (data) => {
+    const room = rooms.get(currentRoom);
+    if (room) {
+      room.videoId = data.videoId;
+      room.playlistId = "";
+      room.isPlaylist = false;
+      room.isPlaying = false;
+      room.currentTime = 0;
+      room.lastUpdate = Date.now();
+      
+      socket.to(currentRoom).emit("changeVideo", data);
+      console.log(`Video changed in room ${currentRoom} to ${data.videoId}`);
+    }
   });
 
   // Change playlist event
-  socket.on("changePlaylist", (newPlaylistId) => {
-    const roomId = userRooms.get(socket.id);
-    const roomState = roomStates.get(roomId);
-
-    roomState.mediaType = "playlist";
-    roomState.mediaId = newPlaylistId;
-    roomState.isPlaying = false;
-    roomState.currentTime = 0;
-    roomState.lastUpdate = Date.now();
-
-    socket.to(roomId).emit("changePlaylist", newPlaylistId);
-    console.log(`Room ${roomId} playlist changed to:`, newPlaylistId);
+  socket.on("changePlaylist", (data) => {
+    const room = rooms.get(currentRoom);
+    if (room) {
+      room.playlistId = data.playlistId;
+      room.videoId = "";
+      room.isPlaylist = true;
+      room.isPlaying = false;
+      room.currentTime = 0;
+      room.lastUpdate = Date.now();
+      
+      socket.to(currentRoom).emit("changePlaylist", data);
+      console.log(`Playlist changed in room ${currentRoom} to ${data.playlistId}`);
+    }
   });
 
-  // Request current state (for late joiners)
-  socket.on("requestState", () => {
-    const roomId = userRooms.get(socket.id);
-    const roomState = roomStates.get(roomId);
-    
-    socket.emit("stateUpdate", {
-      mediaType: roomState.mediaType,
-      mediaId: roomState.mediaId,
-      isPlaying: roomState.isPlaying,
-      currentTime: roomState.currentTime,
-      isNewUser: true
-    });
+  // Get current room state
+  socket.on("getRoomState", () => {
+    const room = rooms.get(currentRoom);
+    if (room) {
+      socket.emit("roomState", room);
+    }
   });
 
   socket.on("disconnect", () => {
-    const roomId = userRooms.get(socket.id);
-    console.log("User disconnected:", socket.id, "from room:", roomId);
-    userRooms.delete(socket.id);
+    console.log("User disconnected:", socket.id);
   });
 });
 
-// Clean up old rooms periodically (optional)
+// Clean up old rooms periodically
 setInterval(() => {
   const now = Date.now();
-  for (const [roomId, state] of roomStates.entries()) {
-    // Remove rooms inactive for more than 1 hour
-    if (now - state.lastUpdate > 3600000) {
-      roomStates.delete(roomId);
-      console.log(`Cleaned up room: ${roomId}`);
+  const tenMinutes = 10 * 60 * 1000;
+  
+  for (const [roomId, room] of rooms.entries()) {
+    if (now - room.lastUpdate > tenMinutes) {
+      rooms.delete(roomId);
+      console.log(`Cleaned up old room: ${roomId}`);
     }
   }
-}, 60000); // Check every minute
+}, 5 * 60 * 1000); // Check every 5 minutes
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
