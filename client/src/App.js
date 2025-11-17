@@ -314,10 +314,10 @@ function App() {
     });
 
     // Play event from server
-    socketRef.current.on("play", (data) => {
-      if (isRemoteAction.current) return;
-      
-      const { time, isPlaylist: remoteIsPlaylist, mediaId, fromServer } = data;
+  socketRef.current.on("play", (data) => {
+  if (isRemoteAction.current) return;
+  
+  const { time, isPlaylist: remoteIsPlaylist, mediaId } = data;
       
       // Only sync if media is different
       if (remoteIsPlaylist !== isPlaylist || mediaId !== (isPlaylist ? playlistId : videoId)) {
