@@ -12,18 +12,138 @@ import {
 
 const SOCKET_URL = "https://synkim.onrender.com";
 
+// Replace with your Firebase config
 const firebaseConfig = {
-  apiKey: "AIzaSyD-IbYzApHkLTnDX8vXDf_fid2ULzyyu_s",
-  authDomain: "synkim-dfd33.firebaseapp.com",
-  projectId: "synkim-dfd33",
-  storageBucket: "synkim-dfd33.firebasestorage.app",
-  messagingSenderId: "982327873530",
-  appId: "1:982327873530:web:b3a2bebf995b48f65c5e43"
+  apiKey: "your-api-key",
+  authDomain: "your-project.firebaseapp.com",
+  projectId: "your-project-id",
+  storageBucket: "your-project.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "your-app-id"
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+
+// Separate AuthForm component to prevent re-renders
+const AuthForm = ({ onAuth, onToggleMode, isLogin, authError, setAuthError }) => {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onAuth(email, password);
+  };
+
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: '100vh',
+      backgroundColor: '#f5f5f5'
+    }}>
+      <div style={{
+        backgroundColor: 'white',
+        padding: '40px',
+        borderRadius: '10px',
+        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        width: '400px'
+      }}>
+        <h2 style={{ textAlign: 'center', marginBottom: '30px', color: '#333' }}>
+          {isLogin ? 'Sign In to SYNKIM' : 'Create Account'}
+        </h2>
+        
+        {authError && (
+          <div style={{
+            color: 'red',
+            backgroundColor: '#ffe6e6',
+            padding: '10px',
+            borderRadius: '5px',
+            marginBottom: '20px',
+            textAlign: 'center'
+          }}>
+            {authError}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: '20px' }}>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email"
+              required
+              style={{
+                width: '100%',
+                padding: '12px',
+                fontSize: '16px',
+                borderRadius: '5px',
+                border: '1px solid #ddd'
+              }}
+            />
+          </div>
+          
+          <div style={{ marginBottom: '20px' }}>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              required
+              style={{
+                width: '100%',
+                padding: '12px',
+                fontSize: '16px',
+                borderRadius: '5px',
+                border: '1px solid #ddd'
+              }}
+            />
+          </div>
+
+          <button
+            type="submit"
+            style={{
+              width: '100%',
+              padding: '12px',
+              fontSize: '16px',
+              borderRadius: '5px',
+              backgroundColor: '#007BFF',
+              color: 'white',
+              border: 'none',
+              cursor: 'pointer',
+              marginBottom: '15px'
+            }}
+          >
+            {isLogin ? 'Sign In' : 'Sign Up'}
+          </button>
+        </form>
+
+        <div style={{ textAlign: 'center' }}>
+          <button
+            onClick={() => {
+              onToggleMode();
+              setEmail("");
+              setPassword("");
+              setAuthError("");
+            }}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#007BFF',
+              cursor: 'pointer',
+              textDecoration: 'underline'
+            }}
+          >
+            {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 function App() {
   const socketRef = useRef(null);
@@ -39,8 +159,6 @@ function App() {
   
   // Auth states
   const [user, setUser] = useState(null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [isLogin, setIsLogin] = useState(true);
   const [authError, setAuthError] = useState("");
 
@@ -76,8 +194,7 @@ function App() {
   }
 
   // Auth functions
-  const handleAuth = async (e) => {
-    e.preventDefault();
+  const handleAuth = async (email, password) => {
     setAuthError("");
     
     try {
@@ -97,6 +214,11 @@ function App() {
     } catch (error) {
       console.error("Logout error:", error);
     }
+  };
+
+  const handleToggleAuthMode = () => {
+    setIsLogin(!isLogin);
+    setAuthError("");
   };
 
   // Listen to auth state changes
@@ -143,8 +265,9 @@ function App() {
     }
   };
 
+  // Socket connection and event handlers
   useEffect(() => {
-    if (!user) return; // Only connect socket if user is logged in
+    if (!user) return;
 
     socketRef.current = io(SOCKET_URL);
 
@@ -280,7 +403,9 @@ function App() {
             isPlaylist: isPlaylist,
             mediaId: isPlaylist ? playlistId : videoId
           };
-          socketRef.current.emit("sync", mediaData);
+          if (socketRef.current) {
+            socketRef.current.emit("sync", mediaData);
+          }
         } catch (error) {
           console.error("Sync error:", error);
         }
@@ -299,7 +424,9 @@ function App() {
           isPlaylist: isPlaylist,
           mediaId: isPlaylist ? playlistId : videoId
         };
-        socketRef.current.emit("play", mediaData);
+        if (socketRef.current) {
+          socketRef.current.emit("play", mediaData);
+        }
       } catch (error) {
         console.error("Play emit error:", error);
       }
@@ -315,7 +442,9 @@ function App() {
           isPlaylist: isPlaylist,
           mediaId: isPlaylist ? playlistId : videoId
         };
-        socketRef.current.emit("pause", mediaData);
+        if (socketRef.current) {
+          socketRef.current.emit("pause", mediaData);
+        }
       } catch (error) {
         console.error("Pause emit error:", error);
       }
@@ -350,11 +479,15 @@ function App() {
       if (result.type === "playlist") {
         setPlaylistId(result.id);
         setIsPlaylist(true);
-        socketRef.current.emit("changePlaylist", result.id);
+        if (socketRef.current) {
+          socketRef.current.emit("changePlaylist", result.id);
+        }
       } else {
         setVideoId(result.id);
         setIsPlaylist(false);
-        socketRef.current.emit("changeVideo", result.id);
+        if (socketRef.current) {
+          socketRef.current.emit("changeVideo", result.id);
+        }
       }
       setPlayerKey(prev => prev + 1);
     } else {
@@ -390,115 +523,20 @@ function App() {
     }
   };
 
-  // Auth Form Component
-  const AuthForm = () => (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: '100vh',
-      backgroundColor: '#f5f5f5'
-    }}>
-      <div style={{
-        backgroundColor: 'white',
-        padding: '40px',
-        borderRadius: '10px',
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-        width: '400px'
-      }}>
-        <h2 style={{ textAlign: 'center', marginBottom: '30px', color: '#333' }}>
-          {isLogin ? 'Sign In to SYNKIM' : 'Create Account'}
-        </h2>
-        
-        {authError && (
-          <div style={{
-            color: 'red',
-            backgroundColor: '#ffe6e6',
-            padding: '10px',
-            borderRadius: '5px',
-            marginBottom: '20px',
-            textAlign: 'center'
-          }}>
-            {authError}
-          </div>
-        )}
+  // Render based on auth state
+  if (!user) {
+    return (
+      <AuthForm 
+        onAuth={handleAuth}
+        onToggleMode={handleToggleAuthMode}
+        isLogin={isLogin}
+        authError={authError}
+        setAuthError={setAuthError}
+      />
+    );
+  }
 
-        <form onSubmit={handleAuth}>
-          <div style={{ marginBottom: '20px' }}>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email"
-              required
-              style={{
-                width: '100%',
-                padding: '12px',
-                fontSize: '16px',
-                borderRadius: '5px',
-                border: '1px solid #ddd'
-              }}
-            />
-          </div>
-          
-          <div style={{ marginBottom: '20px' }}>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password"
-              required
-              style={{
-                width: '100%',
-                padding: '12px',
-                fontSize: '16px',
-                borderRadius: '5px',
-                border: '1px solid #ddd'
-              }}
-            />
-          </div>
-
-          <button
-            type="submit"
-            style={{
-              width: '100%',
-              padding: '12px',
-              fontSize: '16px',
-              borderRadius: '5px',
-              backgroundColor: '#007BFF',
-              color: 'white',
-              border: 'none',
-              cursor: 'pointer',
-              marginBottom: '15px'
-            }}
-          >
-            {isLogin ? 'Sign In' : 'Sign Up'}
-          </button>
-        </form>
-
-        <div style={{ textAlign: 'center' }}>
-          <button
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setAuthError('');
-            }}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#007BFF',
-              cursor: 'pointer',
-              textDecoration: 'underline'
-            }}
-          >
-            {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Main App Component
-  const MainApp = () => (
+  return (
     <div style={{ textAlign: "center", padding: "30px" }}>
       {/* Header with user info */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -592,13 +630,6 @@ function App() {
       </p>
     </div>
   );
-
-  // Render based on auth state
-  if (!user) {
-    return <AuthForm />;
-  }
-
-  return <MainApp />;
 }
 
 export default App;
