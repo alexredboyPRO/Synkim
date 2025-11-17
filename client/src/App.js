@@ -1,8 +1,29 @@
 import React, { useEffect, useRef, useState } from "react";
 import YouTube from "react-youtube";
 import io from "socket.io-client";
+import { initializeApp } from "firebase/app";
+import { 
+  getAuth, 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged
+} from "firebase/auth";
 
 const SOCKET_URL = "https://synkim.onrender.com";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD-IbYzApHkLTnDX8vXDf_fid2ULzyyu_s",
+  authDomain: "synkim-dfd33.firebaseapp.com",
+  projectId: "synkim-dfd33",
+  storageBucket: "synkim-dfd33.firebasestorage.app",
+  messagingSenderId: "982327873530",
+  appId: "1:982327873530:web:b3a2bebf995b48f65c5e43"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
 
 function App() {
   const socketRef = useRef(null);
@@ -14,7 +35,14 @@ function App() {
   const [isPlaylist, setIsPlaylist] = useState(false);
   const [playerKey, setPlayerKey] = useState(0);
   const [playlistId, setPlaylistId] = useState("");
-  const [playerState, setPlayerState] = useState(-1); // -1: unstarted, 0: ended, 1: playing, 2: paused, 3: buffering, 5: video cued
+  const [playerState, setPlayerState] = useState(-1);
+  
+  // Auth states
+  const [user, setUser] = useState(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLogin, setIsLogin] = useState(true);
+  const [authError, setAuthError] = useState("");
 
   function extractYouTubeId(url) {
     if (!url) return null;
@@ -47,7 +75,41 @@ function App() {
     return null;
   }
 
-  // Safe player control functions
+  // Auth functions
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    
+    try {
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
+      }
+    } catch (error) {
+      setAuthError(error.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  };
+
+  // Listen to auth state changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      if (user) {
+        setAuthError("");
+      }
+    });
+    return unsubscribe;
+  }, []);
+
   const safeSeekTo = (time) => {
     if (!playerRef.current) return false;
     try {
@@ -82,6 +144,8 @@ function App() {
   };
 
   useEffect(() => {
+    if (!user) return; // Only connect socket if user is logged in
+
     socketRef.current = io(SOCKET_URL);
 
     socketRef.current.on("play", (data) => {
@@ -89,7 +153,6 @@ function App() {
       
       const { time, isPlaylist: remoteIsPlaylist, mediaId } = data;
       
-      // Handle media type changes
       if (remoteIsPlaylist !== isPlaylist || mediaId !== (isPlaylist ? playlistId : videoId)) {
         if (remoteIsPlaylist) {
           setPlaylistId(mediaId);
@@ -102,7 +165,6 @@ function App() {
         return;
       }
       
-      // Only sync if player is ready and not in error state
       if (playerRef.current && playerState >= 0) {
         const currentTime = playerRef.current.getCurrentTime();
         const diff = Math.abs(currentTime - time);
@@ -160,7 +222,7 @@ function App() {
       if (isRemoteAction.current) return;
       
       const now = Date.now();
-      if (now - lastSyncTime.current < 8000) { // Increased cooldown
+      if (now - lastSyncTime.current < 8000) {
         return;
       }
       
@@ -174,7 +236,7 @@ function App() {
         const currentTime = playerRef.current.getCurrentTime();
         const diff = Math.abs(currentTime - time);
         
-        if (diff > 8) { // Increased threshold
+        if (diff > 8) {
           isRemoteAction.current = true;
           safeSeekTo(time);
           lastSyncTime.current = now;
@@ -197,17 +259,18 @@ function App() {
       setPlayerKey(prev => prev + 1);
     });
 
-    return () => socketRef.current.disconnect();
-  }, [isPlaylist, playlistId, videoId, playerState]);
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
+  }, [user, isPlaylist, playlistId, videoId, playerState]);
 
   const onReady = (event) => {
     playerRef.current = event.target;
     console.log("Player ready");
-    
-    // Initialize player state
-    setPlayerState(-1); // unstarted
+    setPlayerState(-1);
 
-    // Start sync interval
     const syncInterval = setInterval(() => {
       if (playerRef.current && !isRemoteAction.current && playerState >= 0) {
         try {
@@ -222,7 +285,7 @@ function App() {
           console.error("Sync error:", error);
         }
       }
-    }, 15000); // Reduced frequency
+    }, 15000);
 
     return () => clearInterval(syncInterval);
   };
@@ -262,10 +325,8 @@ function App() {
   const onStateChange = (event) => {
     const newState = event.data;
     setPlayerState(newState);
-    console.log("Player state changed to:", newState);
 
-    // Handle playlist auto-play when cued
-    if (isPlaylist && newState === 5) { // 5 = video cued
+    if (isPlaylist && newState === 5) {
       setTimeout(() => {
         if (playerRef.current && !isRemoteAction.current) {
           safePlayVideo();
@@ -273,15 +334,13 @@ function App() {
       }, 1000);
     }
 
-    // Reset remote action flag on ended state
-    if (newState === 0) { // 0 = ended
+    if (newState === 0) {
       isRemoteAction.current = false;
     }
   };
 
   const onError = (event) => {
     console.error("Player error:", event.data);
-    // Don't try to recover immediately - wait for user action
     isRemoteAction.current = false;
   };
 
@@ -331,11 +390,139 @@ function App() {
     }
   };
 
-  return (
+  // Auth Form Component
+  const AuthForm = () => (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: '100vh',
+      backgroundColor: '#f5f5f5'
+    }}>
+      <div style={{
+        backgroundColor: 'white',
+        padding: '40px',
+        borderRadius: '10px',
+        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        width: '400px'
+      }}>
+        <h2 style={{ textAlign: 'center', marginBottom: '30px', color: '#333' }}>
+          {isLogin ? 'Sign In to SYNKIM' : 'Create Account'}
+        </h2>
+        
+        {authError && (
+          <div style={{
+            color: 'red',
+            backgroundColor: '#ffe6e6',
+            padding: '10px',
+            borderRadius: '5px',
+            marginBottom: '20px',
+            textAlign: 'center'
+          }}>
+            {authError}
+          </div>
+        )}
+
+        <form onSubmit={handleAuth}>
+          <div style={{ marginBottom: '20px' }}>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email"
+              required
+              style={{
+                width: '100%',
+                padding: '12px',
+                fontSize: '16px',
+                borderRadius: '5px',
+                border: '1px solid #ddd'
+              }}
+            />
+          </div>
+          
+          <div style={{ marginBottom: '20px' }}>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              required
+              style={{
+                width: '100%',
+                padding: '12px',
+                fontSize: '16px',
+                borderRadius: '5px',
+                border: '1px solid #ddd'
+              }}
+            />
+          </div>
+
+          <button
+            type="submit"
+            style={{
+              width: '100%',
+              padding: '12px',
+              fontSize: '16px',
+              borderRadius: '5px',
+              backgroundColor: '#007BFF',
+              color: 'white',
+              border: 'none',
+              cursor: 'pointer',
+              marginBottom: '15px'
+            }}
+          >
+            {isLogin ? 'Sign In' : 'Sign Up'}
+          </button>
+        </form>
+
+        <div style={{ textAlign: 'center' }}>
+          <button
+            onClick={() => {
+              setIsLogin(!isLogin);
+              setAuthError('');
+            }}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#007BFF',
+              cursor: 'pointer',
+              textDecoration: 'underline'
+            }}
+          >
+            {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Main App Component
+  const MainApp = () => (
     <div style={{ textAlign: "center", padding: "30px" }}>
-      <h1 style={{ fontSize: "36px", fontWeight: "bold", marginBottom: "20px" }}>
-        SYNKIM
-      </h1>
+      {/* Header with user info */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h1 style={{ fontSize: "36px", fontWeight: "bold", margin: 0 }}>
+          SYNKIM
+        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <span style={{ color: '#666' }}>Welcome, {user.email}</span>
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: '8px 16px',
+              fontSize: '14px',
+              borderRadius: '5px',
+              backgroundColor: '#dc3545',
+              color: 'white',
+              border: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            Logout
+          </button>
+        </div>
+      </div>
 
       <div style={{ marginBottom: "20px" }}>
         <input
@@ -405,6 +592,13 @@ function App() {
       </p>
     </div>
   );
+
+  // Render based on auth state
+  if (!user) {
+    return <AuthForm />;
+  }
+
+  return <MainApp />;
 }
 
 export default App;
