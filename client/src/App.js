@@ -149,7 +149,6 @@ function App() {
   const socketRef = useRef(null);
   const playerRef = useRef(null);
   const isRemoteAction = useRef(false);
-  const lastSyncTime = useRef(0);
   const hasReceivedInitialState = useRef(false);
   const [videoId, setVideoId] = useState("dQw4w9WgXcQ");
   const [inputUrl, setInputUrl] = useState("");
