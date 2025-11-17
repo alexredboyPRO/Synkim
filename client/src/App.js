@@ -14,12 +14,12 @@ const SOCKET_URL = "https://synkim.onrender.com";
 
 // Replace with your Firebase config
 const firebaseConfig = {
-  apiKey: "your-api-key",
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "your-project-id",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "your-app-id"
+  apiKey: "AIzaSyD-IbYzApHkLTnDX8vXDf_fid2ULzyyu_s",
+  authDomain: "synkim-dfd33.firebaseapp.com",
+  projectId: "synkim-dfd33",
+  storageBucket: "synkim-dfd33.firebasestorage.app",
+  messagingSenderId: "982327873530",
+  appId: "1:982327873530:web:b3a2bebf995b48f65c5e43"
 };
 
 // Initialize Firebase
