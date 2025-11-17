@@ -216,13 +216,31 @@ function App() {
     }
   };
 
-  const opts = {
-    height: "390",
-    width: "640",
-    playerVars: { 
-      autoplay: 0,
-      ...(isPlaylist && { list: videoId, listType: 'playlist' })
-    },
+  // Responsive YouTube player options
+  const getPlayerOpts = () => {
+    // Get screen width for responsive sizing
+    const screenWidth = window.innerWidth;
+    let width, height;
+    
+    if (screenWidth < 768) { // Mobile
+      width = Math.min(screenWidth - 40, 400); // 40px for padding
+      height = width * 0.75; // 4:3 aspect ratio for mobile
+    } else if (screenWidth < 1024) { // Tablet
+      width = 640;
+      height = 390;
+    } else { // Desktop
+      width = 640;
+      height = 390;
+    }
+
+    return {
+      height: height.toString(),
+      width: width.toString(),
+      playerVars: { 
+        autoplay: 0,
+        ...(isPlaylist && { list: videoId, listType: 'playlist' })
+      },
+    };
   };
 
   // Auth Form
@@ -233,16 +251,23 @@ function App() {
         justifyContent: 'center',
         alignItems: 'center',
         height: '100vh',
-        backgroundColor: '#f5f5f5'
+        backgroundColor: '#f5f5f5',
+        padding: '20px'
       }}>
         <div style={{
           backgroundColor: 'white',
-          padding: '40px',
+          padding: '30px 20px',
           borderRadius: '10px',
           boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-          width: '400px'
+          width: '100%',
+          maxWidth: '400px'
         }}>
-          <h2 style={{ textAlign: 'center', marginBottom: '30px', color: '#333' }}>
+          <h2 style={{ 
+            textAlign: 'center', 
+            marginBottom: '25px', 
+            color: '#333',
+            fontSize: '24px'
+          }}>
             {isLogin ? 'Sign In to SYNKIM' : 'Create Account'}
           </h2>
           
@@ -253,14 +278,15 @@ function App() {
               padding: '10px',
               borderRadius: '5px',
               marginBottom: '20px',
-              textAlign: 'center'
+              textAlign: 'center',
+              fontSize: '14px'
             }}>
               {authError}
             </div>
           )}
 
           <form onSubmit={handleAuth}>
-            <div style={{ marginBottom: '20px' }}>
+            <div style={{ marginBottom: '15px' }}>
               <input
                 type="email"
                 value={email}
@@ -270,7 +296,7 @@ function App() {
                 style={{
                   width: '100%',
                   padding: '12px',
-                  fontSize: '16px',
+                  fontSize: '16px', // Prevents zoom on iOS
                   borderRadius: '5px',
                   border: '1px solid #ddd'
                 }}
@@ -287,7 +313,7 @@ function App() {
                 style={{
                   width: '100%',
                   padding: '12px',
-                  fontSize: '16px',
+                  fontSize: '16px', // Prevents zoom on iOS
                   borderRadius: '5px',
                   border: '1px solid #ddd'
                 }}
@@ -323,7 +349,8 @@ function App() {
                 border: 'none',
                 color: '#007BFF',
                 cursor: 'pointer',
-                textDecoration: 'underline'
+                textDecoration: 'underline',
+                fontSize: '14px'
               }}
             >
               {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
@@ -336,13 +363,40 @@ function App() {
 
   // Main App
   return (
-    <div style={{ textAlign: "center", padding: "30px" }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1 style={{ fontSize: "36px", fontWeight: "bold", margin: 0 }}>
+    <div style={{ 
+      textAlign: "center", 
+      padding: "20px 15px",
+      minHeight: '100vh',
+      boxSizing: 'border-box'
+    }}>
+      {/* Header */}
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: window.innerWidth < 768 ? 'column' : 'row',
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: '20px',
+        gap: '15px'
+      }}>
+        <h1 style={{ 
+          fontSize: window.innerWidth < 768 ? "28px" : "36px", 
+          fontWeight: "bold", 
+          margin: 0 
+        }}>
           SYNKIM
         </h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <span style={{ color: '#666' }}>Welcome, {user.email}</span>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '15px',
+          flexDirection: window.innerWidth < 768 ? 'column' : 'row'
+        }}>
+          <span style={{ 
+            color: '#666',
+            fontSize: window.innerWidth < 768 ? '14px' : '16px'
+          }}>
+            Welcome, {user.email}
+          </span>
           <button
             onClick={handleLogout}
             style={{
@@ -360,46 +414,66 @@ function App() {
         </div>
       </div>
 
-      <div style={{ marginBottom: "20px" }}>
+      {/* Video Input */}
+      <div style={{ 
+        marginBottom: "20px",
+        display: 'flex',
+        flexDirection: window.innerWidth < 768 ? 'column' : 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '10px'
+      }}>
         <input
           type="text"
           value={inputUrl}
           onChange={(e) => setInputUrl(e.target.value)}
           placeholder="Paste YouTube video or playlist link here"
           style={{
-            width: "400px",
-            padding: "8px",
+            width: window.innerWidth < 768 ? "100%" : "400px",
+            maxWidth: "400px",
+            padding: "10px",
             fontSize: "16px",
             borderRadius: "8px",
             border: "1px solid #ccc",
-            marginRight: "10px",
           }}
         />
         <button
           onClick={handleVideoChange}
           style={{
-            padding: "8px 16px",
+            padding: "10px 20px",
             fontSize: "16px",
             borderRadius: "8px",
             backgroundColor: "#007BFF",
             color: "white",
             border: "none",
             cursor: "pointer",
+            whiteSpace: 'nowrap'
           }}
         >
           Load {isPlaylist ? "Playlist" : "Video"}
         </button>
       </div>
 
-      <YouTube
-        videoId={isPlaylist ? undefined : videoId}
-        opts={opts}
-        onReady={onReady}
-        onPlay={onPlay}
-        onPause={onPause}
-      />
+      {/* YouTube Player */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        marginBottom: '20px'
+      }}>
+        <YouTube
+          videoId={isPlaylist ? undefined : videoId}
+          opts={getPlayerOpts()}
+          onReady={onReady}
+          onPlay={onPlay}
+          onPause={onPause}
+        />
+      </div>
 
-      <p style={{ marginTop: "20px", color: "#555" }}>
+      <p style={{ 
+        marginTop: "20px", 
+        color: "#555",
+        fontSize: window.innerWidth < 768 ? "14px" : "16px"
+      }}>
         {isPlaylist ? "Now playing playlist" : "Now playing video"} - Open on two devices to test sync.
       </p>
     </div>
