@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import YouTube from "react-youtube";
 import io from "socket.io-client";
 import { initializeApp } from "firebase/app";
@@ -229,13 +229,13 @@ function App() {
       setUser(user);
       if (user) {
         setAuthError("");
-        hasReceivedInitialState.current = false; // Reset for new session
+        hasReceivedInitialState.current = false;
       }
     });
     return unsubscribe;
   }, []);
 
-  const safeSeekTo = (time) => {
+  const safeSeekTo = useCallback((time) => {
     if (!playerRef.current) return false;
     try {
       playerRef.current.seekTo(time, true);
@@ -244,9 +244,9 @@ function App() {
       console.error("Seek error:", error);
       return false;
     }
-  };
+  }, []);
 
-  const safePlayVideo = () => {
+  const safePlayVideo = useCallback(() => {
     if (!playerRef.current) return false;
     try {
       playerRef.current.playVideo();
@@ -255,9 +255,9 @@ function App() {
       console.error("Play error:", error);
       return false;
     }
-  };
+  }, []);
 
-  const safePauseVideo = () => {
+  const safePauseVideo = useCallback(() => {
     if (!playerRef.current) return false;
     try {
       playerRef.current.pauseVideo();
@@ -266,7 +266,7 @@ function App() {
       console.error("Pause error:", error);
       return false;
     }
-  };
+  }, []);
 
   // Socket connection and event handlers
   useEffect(() => {
@@ -434,7 +434,7 @@ function App() {
       if (isRemoteAction.current) return;
       
       const now = Date.now();
-      if (now - lastSyncTime.current < 10000) { // 10 second cooldown
+      if (now - lastSyncTime.current < 10000) {
         return;
       }
       
@@ -484,9 +484,9 @@ function App() {
       }
       hasReceivedInitialState.current = false;
     };
-  }, [user]); // Only depend on user, not on media states
+  }, [user, isPlaylist, playlistId, videoId, playerState, safeSeekTo, safePlayVideo, safePauseVideo]);
 
-  const onReady = (event) => {
+  const onReady = useCallback((event) => {
     playerRef.current = event.target;
     console.log("Player ready - state:", playerState);
     setPlayerState(-1);
@@ -508,12 +508,12 @@ function App() {
           console.error("Sync error:", error);
         }
       }
-    }, 20000); // Every 20 seconds
+    }, 20000);
 
     return () => clearInterval(syncInterval);
-  };
+  }, [isPlaylist, playlistId, videoId, playerState]);
 
-  const onPlay = () => {
+  const onPlay = useCallback(() => {
     if (isRemoteAction.current) {
       console.log("Ignoring play - remote action in progress");
       return;
@@ -537,9 +537,9 @@ function App() {
         console.error("Play emit error:", error);
       }
     }
-  };
+  }, [isPlaylist, playlistId, videoId, playerState]);
 
-  const onPause = () => {
+  const onPause = useCallback(() => {
     if (isRemoteAction.current) {
       console.log("Ignoring pause - remote action in progress");
       return;
@@ -563,9 +563,9 @@ function App() {
         console.error("Pause emit error:", error);
       }
     }
-  };
+  }, [isPlaylist, playlistId, videoId, playerState]);
 
-  const onStateChange = (event) => {
+  const onStateChange = useCallback((event) => {
     const newState = event.data;
     setPlayerState(newState);
     
@@ -589,12 +589,12 @@ function App() {
     if (newState === 0) {
       isRemoteAction.current = false;
     }
-  };
+  }, [isPlaylist, isPlaying, safePlayVideo]);
 
-  const onError = (event) => {
+  const onError = useCallback((event) => {
     console.error("Player error:", event.data);
     isRemoteAction.current = false;
-  };
+  }, []);
 
   const handleVideoChange = () => {
     const result = extractYouTubeId(inputUrl);
@@ -614,19 +614,19 @@ function App() {
           socketRef.current.emit("changeVideo", data);
         }
       }
-      setInputUrl(""); // Clear input after loading
+      setInputUrl("");
       setPlayerKey(prev => prev + 1);
     } else {
       alert("Invalid YouTube link. Please provide a valid YouTube video or playlist URL.");
     }
   };
 
-  const getPlayerOpts = () => {
+  const getPlayerOpts = useCallback(() => {
     const baseOpts = {
       height: "390",
       width: "640",
       playerVars: {
-        autoplay: 0, // Important: don't autoplay, let sync handle it
+        autoplay: 0,
         modestbranding: 1,
         origin: window.location.origin,
         enablejsapi: 1,
@@ -647,7 +647,7 @@ function App() {
     } else {
       return baseOpts;
     }
-  };
+  }, [isPlaylist, playlistId]);
 
   // Render based on auth state
   if (!user) {
