@@ -150,6 +150,7 @@ function App() {
   const playerRef = useRef(null);
   const isRemoteAction = useRef(false);
   const lastSyncTime = useRef(0);
+  const hasReceivedInitialState = useRef(false);
   const [videoId, setVideoId] = useState("dQw4w9WgXcQ");
   const [inputUrl, setInputUrl] = useState("");
   const [isPlaylist, setIsPlaylist] = useState(false);
@@ -228,6 +229,7 @@ function App() {
       setUser(user);
       if (user) {
         setAuthError("");
+        hasReceivedInitialState.current = false; // Reset for new session
       }
     });
     return unsubscribe;
@@ -275,54 +277,87 @@ function App() {
     // Join room immediately after connection
     socketRef.current.emit("joinRoom", "default");
 
-    // Receive current room state when joining
+    // Receive current room state when joining - ONLY ONCE
     socketRef.current.on("roomState", (roomState) => {
-      console.log("Received room state:", roomState);
+      if (hasReceivedInitialState.current) {
+        console.log("Ignoring duplicate room state");
+        return;
+      }
+      
+      console.log("Received initial room state:", roomState);
+      hasReceivedInitialState.current = true;
       isRemoteAction.current = true;
 
-      // Update local state to match room
-      if (roomState.isPlaylist && roomState.playlistId) {
-        setPlaylistId(roomState.playlistId);
-        setIsPlaylist(true);
-        setPlayerKey(prev => prev + 1);
-      } else if (roomState.videoId) {
-        setVideoId(roomState.videoId);
-        setIsPlaylist(false);
-        setPlayerKey(prev => prev + 1);
+      // Only update if we're on default video or if media is different
+      const shouldUpdateMedia = 
+        videoId === "dQw4w9WgXcQ" || 
+        (roomState.isPlaylist && roomState.playlistId !== playlistId) ||
+        (!roomState.isPlaylist && roomState.videoId !== videoId);
+
+      if (shouldUpdateMedia) {
+        if (roomState.isPlaylist && roomState.playlistId) {
+          setPlaylistId(roomState.playlistId);
+          setIsPlaylist(true);
+        } else if (roomState.videoId) {
+          setVideoId(roomState.videoId);
+          setIsPlaylist(false);
+        }
+        
+        // Force re-render with new media
+        setTimeout(() => {
+          setPlayerKey(prev => prev + 1);
+        }, 100);
       }
 
-      // Sync playback state after a short delay to let player load
-      setTimeout(() => {
+      // Sync playback state after player is ready
+      const syncPlaybackState = () => {
         if (playerRef.current) {
-          // Only sync if difference is significant
           const currentTime = playerRef.current.getCurrentTime();
           const diff = Math.abs(currentTime - roomState.currentTime);
           
+          console.log(`Initial sync - Current: ${currentTime}, Room: ${roomState.currentTime}, Diff: ${diff}`);
+          
+          // Only seek if difference is significant
           if (diff > 5) {
             safeSeekTo(roomState.currentTime);
           }
 
-          // Sync play/pause state
-          if (roomState.isPlaying && playerState !== 1) {
-            safePlayVideo();
-          } else if (!roomState.isPlaying && playerState === 1) {
-            safePauseVideo();
-          }
-        }
-        
-        setTimeout(() => {
+          // Sync play/pause state with delay to let seek complete
+          setTimeout(() => {
+            if (roomState.isPlaying) {
+              safePlayVideo();
+            } else {
+              safePauseVideo();
+            }
+            
+            setTimeout(() => {
+              isRemoteAction.current = false;
+              console.log("Initial sync complete");
+            }, 1000);
+          }, 500);
+        } else {
           isRemoteAction.current = false;
-        }, 1000);
-      }, 2000);
+        }
+      };
+
+      // Wait for player to be ready if we changed media
+      if (shouldUpdateMedia) {
+        setTimeout(syncPlaybackState, 2000);
+      } else {
+        syncPlaybackState();
+      }
     });
 
+    // Regular play event from other users
     socketRef.current.on("play", (data) => {
       if (isRemoteAction.current) return;
       
       console.log("Remote play received:", data);
-      
-      // Update media if different
+      isRemoteAction.current = true;
+
+      // Handle media change if needed
       if (data.isPlaylist !== isPlaylist || data.mediaId !== (isPlaylist ? playlistId : videoId)) {
+        console.log("Media change detected during play");
         if (data.isPlaylist) {
           setPlaylistId(data.mediaId);
           setIsPlaylist(true);
@@ -330,37 +365,30 @@ function App() {
           setVideoId(data.mediaId);
           setIsPlaylist(false);
         }
-        setPlayerKey(prev => prev + 1);
         
-        // Wait for player to load then play
         setTimeout(() => {
-          if (playerRef.current) {
-            const currentTime = playerRef.current.getCurrentTime();
-            const diff = Math.abs(currentTime - data.time);
-            
-            if (diff > 3) {
-              isRemoteAction.current = true;
+          setPlayerKey(prev => prev + 1);
+          setTimeout(() => {
+            if (playerRef.current) {
               safeSeekTo(data.time);
-            }
-            
-            setTimeout(() => {
-              safePlayVideo();
               setTimeout(() => {
-                isRemoteAction.current = false;
+                safePlayVideo();
+                setTimeout(() => {
+                  isRemoteAction.current = false;
+                }, 500);
               }, 500);
-            }, 100);
-          }
-        }, 1000);
+            }
+          }, 1000);
+        }, 100);
         return;
       }
       
       // Same media, just sync and play
-      if (playerRef.current && playerState >= 0) {
+      if (playerRef.current) {
         const currentTime = playerRef.current.getCurrentTime();
         const diff = Math.abs(currentTime - data.time);
         
-        if (diff > 3) {
-          isRemoteAction.current = true;
+        if (diff > 2) {
           safeSeekTo(data.time);
         }
         
@@ -368,22 +396,25 @@ function App() {
           safePlayVideo();
           setTimeout(() => {
             isRemoteAction.current = false;
-          }, 500);
-        }, 100);
+          }, 300);
+        }, 200);
+      } else {
+        isRemoteAction.current = false;
       }
     });
 
+    // Regular pause event from other users
     socketRef.current.on("pause", (data) => {
       if (isRemoteAction.current) return;
       
       console.log("Remote pause received:", data);
+      isRemoteAction.current = true;
       
-      if (playerRef.current && playerState >= 0) {
+      if (playerRef.current) {
         const currentTime = playerRef.current.getCurrentTime();
         const diff = Math.abs(currentTime - data.time);
         
-        if (diff > 3) {
-          isRemoteAction.current = true;
+        if (diff > 2) {
           safeSeekTo(data.time);
         }
         
@@ -391,16 +422,19 @@ function App() {
           safePauseVideo();
           setTimeout(() => {
             isRemoteAction.current = false;
-          }, 500);
-        }, 100);
+          }, 300);
+        }, 200);
+      } else {
+        isRemoteAction.current = false;
       }
     });
 
+    // Time sync only - no state changes
     socketRef.current.on("sync", (data) => {
       if (isRemoteAction.current) return;
       
       const now = Date.now();
-      if (now - lastSyncTime.current < 8000) {
+      if (now - lastSyncTime.current < 10000) { // 10 second cooldown
         return;
       }
       
@@ -408,7 +442,8 @@ function App() {
         const currentTime = playerRef.current.getCurrentTime();
         const diff = Math.abs(currentTime - data.time);
         
-        if (diff > 8) {
+        // Only sync if significantly out of sync
+        if (diff > 10) {
           isRemoteAction.current = true;
           safeSeekTo(data.time);
           lastSyncTime.current = now;
@@ -419,35 +454,44 @@ function App() {
       }
     });
 
+    // Video change event
     socketRef.current.on("changeVideo", (data) => {
+      console.log("Remote video change:", data);
+      isRemoteAction.current = true;
       setVideoId(data.videoId);
       setIsPlaylist(false);
       setPlayerKey(prev => prev + 1);
+      setTimeout(() => {
+        isRemoteAction.current = false;
+      }, 1000);
     });
 
+    // Playlist change event
     socketRef.current.on("changePlaylist", (data) => {
+      console.log("Remote playlist change:", data);
+      isRemoteAction.current = true;
       setPlaylistId(data.playlistId);
       setIsPlaylist(true);
       setPlayerKey(prev => prev + 1);
+      setTimeout(() => {
+        isRemoteAction.current = false;
+      }, 1000);
     });
 
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();
       }
+      hasReceivedInitialState.current = false;
     };
-  }, [user, isPlaylist, playlistId, videoId, playerState]);
+  }, [user]); // Only depend on user, not on media states
 
   const onReady = (event) => {
     playerRef.current = event.target;
-    console.log("Player ready");
+    console.log("Player ready - state:", playerState);
     setPlayerState(-1);
 
-    // Request current room state when player is ready
-    if (socketRef.current) {
-      socketRef.current.emit("getRoomState");
-    }
-
+    // Start sync interval - less frequent
     const syncInterval = setInterval(() => {
       if (playerRef.current && !isRemoteAction.current && playerState >= 0) {
         try {
@@ -464,14 +508,21 @@ function App() {
           console.error("Sync error:", error);
         }
       }
-    }, 15000);
+    }, 20000); // Every 20 seconds
 
     return () => clearInterval(syncInterval);
   };
 
   const onPlay = () => {
+    if (isRemoteAction.current) {
+      console.log("Ignoring play - remote action in progress");
+      return;
+    }
+    
+    console.log("Local play initiated");
     setIsPlaying(true);
-    if (!isRemoteAction.current && playerRef.current && playerState >= 0) {
+    
+    if (playerRef.current && playerState >= 0) {
       try {
         const t = playerRef.current.getCurrentTime();
         const mediaData = {
@@ -489,8 +540,15 @@ function App() {
   };
 
   const onPause = () => {
+    if (isRemoteAction.current) {
+      console.log("Ignoring pause - remote action in progress");
+      return;
+    }
+    
+    console.log("Local pause initiated");
     setIsPlaying(false);
-    if (!isRemoteAction.current && playerRef.current && playerState >= 0) {
+    
+    if (playerRef.current && playerState >= 0) {
       try {
         const t = playerRef.current.getCurrentTime();
         const mediaData = {
@@ -513,12 +571,13 @@ function App() {
     
     // Update playing state based on YouTube player state
     if (newState === 1) {
-      setIsPlaying(true);
+      if (!isPlaying) setIsPlaying(true);
     } else if (newState === 2 || newState === 0) {
-      setIsPlaying(false);
+      if (isPlaying) setIsPlaying(false);
     }
 
-    if (isPlaylist && newState === 5) {
+    // Handle playlist auto-play
+    if (isPlaylist && newState === 5 && !isRemoteAction.current) {
       setTimeout(() => {
         if (playerRef.current && !isRemoteAction.current) {
           safePlayVideo();
@@ -526,6 +585,7 @@ function App() {
       }, 1000);
     }
 
+    // Reset remote action flag on ended state
     if (newState === 0) {
       isRemoteAction.current = false;
     }
@@ -554,6 +614,7 @@ function App() {
           socketRef.current.emit("changeVideo", data);
         }
       }
+      setInputUrl(""); // Clear input after loading
       setPlayerKey(prev => prev + 1);
     } else {
       alert("Invalid YouTube link. Please provide a valid YouTube video or playlist URL.");
@@ -565,7 +626,7 @@ function App() {
       height: "390",
       width: "640",
       playerVars: {
-        autoplay: 0,
+        autoplay: 0, // Important: don't autoplay, let sync handle it
         modestbranding: 1,
         origin: window.location.origin,
         enablejsapi: 1,
@@ -684,11 +745,12 @@ function App() {
       <div style={{ marginTop: "10px", color: "#666", fontSize: "14px" }}>
         Status: {isPlaying ? "Playing" : "Paused"} | 
         Player State: {playerState === -1 ? "Unstarted" : 
-                     playerState === 0 ? "Ended" :
-                     playerState === 1 ? "Playing" :
-                     playerState === 2 ? "Paused" :
-                     playerState === 3 ? "Buffering" :
+                     playerState === 0 ? "Ended" : 
+                     playerState === 1 ? "Playing" : 
+                     playerState === 2 ? "Paused" : 
+                     playerState === 3 ? "Buffering" : 
                      playerState === 5 ? "Video Cued" : "Unknown"}
+        {isRemoteAction.current && " | Syncing..."}
       </div>
 
       <p style={{ marginTop: "20px", color: "#555" }}>
