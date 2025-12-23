@@ -153,20 +153,21 @@ function App() {
   };
 
   // Function to handle playing Spotify song on YouTube
-  const handlePlayOnYouTube = (song, artist) => {
-    if (!socketRef.current) {
-      alert("Not connected to server");
-      return;
-    }
-    
-    setYoutubeSearchStatus({ loading: true, song, artist });
-    
-    socketRef.current.emit("playSpotifyOnYouTube", {
-      song: song,
-      artist: artist,
-      userId: user?.uid || 'anonymous'
-    });
-  };
+const handlePlayOnYouTube = (song, artist, durationMs = null) => {
+  if (!socketRef.current) {
+    alert("Not connected to server");
+    return;
+  }
+  
+  setYoutubeSearchStatus({ loading: true, song, artist });
+  
+  socketRef.current.emit("playSpotifyOnYouTube", {
+    song: song,
+    artist: artist,
+    durationMs: durationMs, // Add duration for better matching
+    userId: user?.uid || 'anonymous'
+  });
+};
 
   // Listen to auth state changes
   useEffect(() => {
@@ -716,7 +717,7 @@ function App() {
               </div>
               {/* YouTube Play Button */}
               <button
-                onClick={() => handlePlayOnYouTube(spotifyTrack.song, spotifyTrack.artist)}
+                onClick={() => handlePlayOnYouTube(spotifyTrack.song, spotifyTrack.artist, spotifyTrack.durationMs)}
                 disabled={youtubeSearchStatus?.loading}
                 style={{
                   marginTop: "10px",
@@ -782,7 +783,7 @@ function App() {
                 )}
                 {/* YouTube Play Button for Other Users */}
                 <button
-                  onClick={() => handlePlayOnYouTube(data.song, data.artist)}
+                  onClick={() => handlePlayOnYouTube(data.song, data.artist, data.durationMs)}
                   disabled={youtubeSearchStatus?.loading && youtubeSearchStatus?.song === data.song}
                   style={{
                     marginTop: "8px",
