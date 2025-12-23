@@ -41,6 +41,12 @@ function App() {
   const [isLogin, setIsLogin] = useState(true);
   const [authError, setAuthError] = useState("");
 
+  // Spotify states
+  const [spotifyConnected, setSpotifyConnected] = useState(false);
+  const [spotifyAuthUrl, setSpotifyAuthUrl] = useState("");
+  const [spotifyTrack, setSpotifyTrack] = useState(null);
+  const [userListening, setUserListening] = useState({});
+
   // Extract video ID or playlist ID
   function extractYouTubeId(url) {
     if (!url) return null;
@@ -97,6 +103,16 @@ function App() {
     }
   };
 
+  // Spotify connect function
+  const handleSpotifyConnect = () => {
+    if (!spotifyConnected && socketRef.current) {
+      socketRef.current.emit("spotifyLogin");
+    } else if (spotifyConnected) {
+      // Already connected - show current status
+      socketRef.current.emit("getSpotifyStatus");
+    }
+  };
+
   // Listen to auth state changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -114,6 +130,7 @@ function App() {
 
     socketRef.current = io(SOCKET_URL);
 
+    // YouTube sync events
     socketRef.current.on("play", (time) => {
       const player = playerRef.current;
       if (!player) return;
@@ -169,8 +186,53 @@ function App() {
       setIsPlaylist(true);
     });
 
+    // Spotify event handlers
+    socketRef.current.on("spotifyAuthUrl", (url) => {
+      setSpotifyAuthUrl(url);
+      // Open Spotify login in a popup
+      const popup = window.open(url, "Spotify Login", "width=600,height=700");
+      // Check if popup was blocked
+      if (!popup || popup.closed) {
+        alert("Popup blocked! Please allow popups for this site.");
+      }
+    });
+
+    socketRef.current.on("spotifyStatus", (data) => {
+      if (data.error === "not_connected") {
+        setSpotifyConnected(false);
+        setSpotifyTrack(null);
+      } else if (data.error === "token_expired") {
+        setSpotifyConnected(false);
+        alert("Spotify token expired. Please reconnect.");
+      } else if (data.isPlaying) {
+        setSpotifyConnected(true);
+        setSpotifyTrack(data);
+      } else {
+        setSpotifyConnected(true);
+        setSpotifyTrack(null);
+      }
+    });
+
+    socketRef.current.on("userListening", (data) => {
+      setUserListening(prev => ({
+        ...prev,
+        [data.userId]: data
+      }));
+    });
+
     return () => socketRef.current.disconnect();
   }, [user]);
+
+  // Periodically check Spotify status
+  useEffect(() => {
+    if (!socketRef.current || !spotifyConnected) return;
+    
+    const interval = setInterval(() => {
+      socketRef.current.emit("getSpotifyStatus");
+    }, 15000); // Check every 15 seconds
+    
+    return () => clearInterval(interval);
+  }, [spotifyConnected]);
 
   const onReady = (event) => {
     playerRef.current = event.target;
@@ -398,6 +460,20 @@ function App() {
             Welcome, {user.email}
           </span>
           <button
+            onClick={handleSpotifyConnect}
+            style={{
+              padding: '8px 16px',
+              fontSize: '14px',
+              borderRadius: '5px',
+              backgroundColor: spotifyConnected ? '#1DB954' : '#555',
+              color: 'white',
+              border: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            {spotifyConnected ? '🎵 Spotify Connected' : 'Connect Spotify'}
+          </button>
+          <button
             onClick={handleLogout}
             style={{
               padding: '8px 16px',
@@ -467,6 +543,78 @@ function App() {
           onPlay={onPlay}
           onPause={onPause}
         />
+      </div>
+
+      {/* Spotify Listening Display */}
+      <div style={{ 
+        marginTop: "20px",
+        padding: "15px",
+        backgroundColor: "#f8f9fa",
+        borderRadius: "8px",
+        maxWidth: "600px",
+        margin: "20px auto",
+        textAlign: "left"
+      }}>
+        <h3 style={{ marginBottom: "10px", color: "#333" }}>
+          🎧 What's Playing
+        </h3>
+        
+        {/* Current user's Spotify status */}
+        {spotifyConnected && spotifyTrack && (
+          <div style={{
+            padding: "10px",
+            marginBottom: "15px",
+            backgroundColor: "#e8f5e9",
+            borderRadius: "5px",
+            borderLeft: "4px solid #1DB954"
+          }}>
+            <strong>You are listening to:</strong>
+            <div style={{ marginTop: "5px" }}>
+              <div style={{ fontWeight: "bold" }}>{spotifyTrack.song}</div>
+              <div style={{ color: "#666" }}>{spotifyTrack.artist}</div>
+              <div style={{ fontSize: "12px", color: "#888" }}>
+                Album: {spotifyTrack.album} • 
+                Progress: {Math.floor(spotifyTrack.progressMs / 1000)}s / 
+                {Math.floor(spotifyTrack.durationMs / 1000)}s
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Other users' listening status */}
+        {Object.keys(userListening).length > 0 && (
+          <div>
+            <h4 style={{ marginBottom: "10px", color: "#666" }}>
+              Other Users Listening:
+            </h4>
+            {Object.entries(userListening).map(([userId, data]) => (
+              <div key={userId} style={{
+                padding: "8px",
+                marginBottom: "8px",
+                backgroundColor: "#fff",
+                borderRadius: "5px",
+                border: "1px solid #e0e0e0"
+              }}>
+                <div style={{ fontWeight: "bold" }}>User {userId.substring(0, 8)}...</div>
+                <div>{data.song} - {data.artist}</div>
+                {data.albumArt && (
+                  <img 
+                    src={data.albumArt} 
+                    alt="Album Art" 
+                    style={{ width: "50px", height: "50px", marginTop: "5px", borderRadius: "3px" }}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {!spotifyConnected && Object.keys(userListening).length === 0 && (
+          <div style={{ color: "#999", fontStyle: "italic" }}>
+            No one is sharing their Spotify listening status yet.
+            Connect Spotify to share what you're listening to!
+          </div>
+        )}
       </div>
 
       <p style={{ 
