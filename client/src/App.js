@@ -9,6 +9,7 @@ import {
   signOut,
   onAuthStateChanged
 } from "firebase/auth";
+import { getFirestore, doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
 
 const SOCKET_URL = "https://synkim.onrender.com";
 
@@ -25,6 +26,7 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+const db = getFirestore(app);
 
 function App() {
   const socketRef = useRef(null);
@@ -49,17 +51,19 @@ function App() {
   // YouTube search states
   const [youtubeSearchStatus, setYoutubeSearchStatus] = useState(null);
 
+  // Profile states
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [username, setUsername] = useState("");
+  const [backgroundColor, setBackgroundColor] = useState("#f0f0f0");
+  const [profileLoaded, setProfileLoaded] = useState(false);
+
   // === ADD THIS NEW useEffect FOR POPUP MESSAGES ===
-  // Listen for messages from the Spotify auth popup
   useEffect(() => {
     const handleMessage = (event) => {
       console.log("Message received from popup:", event.data);
-      // Check for our success message
       if (event.data === 'spotify_auth_success') {
         console.log('Spotify authentication successful!');
-        // Update UI state to show connected
         setSpotifyConnected(true);
-        // Immediately request the current status from backend
         if (socketRef.current) {
           console.log('Requesting Spotify status...');
           socketRef.current.emit('getSpotifyStatus');
@@ -67,16 +71,14 @@ function App() {
       }
     };
 
-    // Add the event listener
     window.addEventListener('message', handleMessage);
     console.log("Message listener added for Spotify auth");
 
-    // Clean up the listener when component unmounts
     return () => {
       window.removeEventListener('message', handleMessage);
       console.log("Message listener removed");
     };
-  }, []); // Empty dependency array means this runs once on mount
+  }, []);
 
   // Extract video ID or playlist ID
   function extractYouTubeId(url) {
@@ -110,6 +112,63 @@ function App() {
     return null;
   }
 
+  // === PROFILE FUNCTIONS ===
+  const loadUserProfile = async (userId) => {
+    try {
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        setUsername(userData.username || user.email.split('@')[0]);
+        setBackgroundColor(userData.backgroundColor || "#f0f0f0");
+      } else {
+        const defaultUsername = user.email.split('@')[0];
+        setUsername(defaultUsername);
+        setBackgroundColor("#f0f0f0");
+        
+        await setDoc(doc(db, "users", userId), {
+          email: user.email,
+          username: defaultUsername,
+          backgroundColor: "#f0f0f0",
+          createdAt: new Date().toISOString()
+        });
+      }
+      setProfileLoaded(true);
+    } catch (error) {
+      console.error("Error loading profile:", error);
+      setUsername(user.email.split('@')[0]);
+      setBackgroundColor("#f0f0f0");
+      setProfileLoaded(true);
+    }
+  };
+
+  const saveProfileSettings = async () => {
+    if (!user) return;
+    
+    try {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        username: username.trim(),
+        backgroundColor: backgroundColor,
+        updatedAt: new Date().toISOString()
+      });
+
+      // Send updated username to socket server
+      if (socketRef.current && username.trim()) {
+        socketRef.current.emit("updateUsername", {
+          username: username.trim(),
+          userId: user.uid
+        });
+      }
+      
+      setShowProfileSettings(false);
+    } catch (error) {
+      console.error("Error saving profile:", error);
+      alert("Error saving profile. Please try again.");
+    }
+  };
+
   // Auth functions
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -129,12 +188,13 @@ function App() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
+      setProfileLoaded(false);
     } catch (error) {
       console.error("Logout error:", error);
     }
   };
 
-  // Spotify connect function - WITH DEBUG LOGGING
+  // Spotify connect function
   const handleSpotifyConnect = () => {
     console.log("Spotify connect button clicked");
     console.log("Socket exists?", !!socketRef.current);
@@ -158,7 +218,6 @@ function App() {
       return;
     }
     
-    // Show loading state
     setYoutubeSearchStatus({ 
       loading: true, 
       song, 
@@ -168,7 +227,6 @@ function App() {
     
     console.log(`🎯 Requesting YouTube search for: ${song} - ${artist}`);
     
-    // Send request to backend
     socketRef.current.emit("playSpotifyOnYouTube", {
       song: song,
       artist: artist,
@@ -180,16 +238,21 @@ function App() {
 
   // Listen to auth state changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       if (user) {
         setAuthError("");
+        await loadUserProfile(user.uid);
+      } else {
+        setProfileLoaded(false);
+        setUsername("");
+        setBackgroundColor("#f0f0f0");
       }
     });
     return unsubscribe;
   }, []);
 
-  // Socket setup - ALWAYS ACTIVE SYNC
+  // Socket setup
   useEffect(() => {
     if (!user) return;
 
@@ -200,9 +263,16 @@ function App() {
       reconnectionDelay: 1000,
     });
 
-    // Add connection event listeners
     socketRef.current.on("connect", () => {
       console.log("Socket connected with ID:", socketRef.current.id);
+      
+      // Send username to backend
+      if (user && username) {
+        socketRef.current.emit("updateUsername", {
+          username: username,
+          userId: user.uid
+        });
+      }
     });
 
     socketRef.current.on("connect_error", (error) => {
@@ -220,7 +290,6 @@ function App() {
       
       isRemoteAction.current = true;
       
-      // ALWAYS check time difference and sync if needed
       const currentTime = player.getCurrentTime();
       if (Math.abs(currentTime - time) > 0.5) {
         player.seekTo(time, true);
@@ -236,7 +305,6 @@ function App() {
       
       isRemoteAction.current = true;
       
-      // ALWAYS check time difference and sync if needed
       const currentTime = player.getCurrentTime();
       if (Math.abs(currentTime - time) > 0.5) {
         player.seekTo(time, true);
@@ -250,7 +318,6 @@ function App() {
       const player = playerRef.current;
       if (!player) return;
       
-      // ALWAYS sync if out of sync (small threshold)
       const currentTime = player.getCurrentTime();
       if (Math.abs(currentTime - time) > 1) {
         isRemoteAction.current = true;
@@ -272,9 +339,7 @@ function App() {
     // Spotify event handlers
     socketRef.current.on("spotifyAuthUrl", (url) => {
       console.log("Received Spotify auth URL:", url);
-      // Open Spotify login in a popup directly
       const popup = window.open(url, "Spotify Login", "width=600,height=700");
-      // Check if popup was blocked
       if (!popup || popup.closed) {
         alert("Popup blocked! Please allow popups for this site.");
         console.error("Popup was blocked by browser");
@@ -310,36 +375,34 @@ function App() {
 
     // YouTube search result handler
     socketRef.current.on("youtubeSearchResult", (result) => {
-    console.log("📨 YouTube search result received:", result);
-    
-    if (result.success) {
-      setYoutubeSearchStatus({
-        loading: false,
-        success: true,
-        message: `🎵 Now playing: ${result.song}`,
-        song: result.song,
-        artist: result.artist
-      });
+      console.log("📨 YouTube search result received:", result);
       
-      // Clear the status message after 4 seconds
-      setTimeout(() => {
-        setYoutubeSearchStatus(null);
-      }, 4000);
-    } else {
-      setYoutubeSearchStatus({
-        loading: false,
-        success: false,
-        message: result.message || `Couldn't find "${result.song}" on YouTube`,
-        song: result.song,
-        artist: result.artist
-      });
-      
-      // Clear the status message after 6 seconds
-      setTimeout(() => {
-        setYoutubeSearchStatus(null);
-      }, 6000);
-    }
-  });
+      if (result.success) {
+        setYoutubeSearchStatus({
+          loading: false,
+          success: true,
+          message: `🎵 Now playing: ${result.song}`,
+          song: result.song,
+          artist: result.artist
+        });
+        
+        setTimeout(() => {
+          setYoutubeSearchStatus(null);
+        }, 4000);
+      } else {
+        setYoutubeSearchStatus({
+          loading: false,
+          success: false,
+          message: result.message || `Couldn't find "${result.song}" on YouTube`,
+          song: result.song,
+          artist: result.artist
+        });
+        
+        setTimeout(() => {
+          setYoutubeSearchStatus(null);
+        }, 6000);
+      }
+    });
 
     return () => {
       if (socketRef.current) {
@@ -356,7 +419,7 @@ function App() {
     const interval = setInterval(() => {
       console.log("Auto-checking Spotify status...");
       socketRef.current.emit("getSpotifyStatus");
-    }, 15000); // Check every 15 seconds
+    }, 15000);
     
     return () => clearInterval(interval);
   }, [spotifyConnected]);
@@ -365,7 +428,6 @@ function App() {
     playerRef.current = event.target;
     console.log("YouTube player ready");
 
-    // Continuous sync every 3 seconds
     const syncInterval = setInterval(() => {
       if (playerRef.current && !isRemoteAction.current) {
         const t = playerRef.current.getCurrentTime();
@@ -373,7 +435,6 @@ function App() {
       }
     }, 3000);
     
-    // Store interval for cleanup
     return () => clearInterval(syncInterval);
   };
 
@@ -411,17 +472,16 @@ function App() {
 
   // Responsive YouTube player options
   const getPlayerOpts = () => {
-    // Get screen width for responsive sizing
     const screenWidth = window.innerWidth;
     let width, height;
     
-    if (screenWidth < 768) { // Mobile
-      width = Math.min(screenWidth - 40, 400); // 40px for padding
-      height = width * 0.75; // 4:3 aspect ratio for mobile
-    } else if (screenWidth < 1024) { // Tablet
+    if (screenWidth < 768) {
+      width = Math.min(screenWidth - 40, 400);
+      height = width * 0.75;
+    } else if (screenWidth < 1024) {
       width = 640;
       height = 390;
-    } else { // Desktop
+    } else {
       width = 640;
       height = 390;
     }
@@ -489,7 +549,7 @@ function App() {
                 style={{
                   width: '100%',
                   padding: '12px',
-                  fontSize: '16px', // Prevents zoom on iOS
+                  fontSize: '16px',
                   borderRadius: '5px',
                   border: '1px solid #ddd'
                 }}
@@ -506,7 +566,7 @@ function App() {
                 style={{
                   width: '100%',
                   padding: '12px',
-                  fontSize: '16px', // Prevents zoom on iOS
+                  fontSize: '16px',
                   borderRadius: '5px',
                   border: '1px solid #ddd'
                 }}
@@ -560,7 +620,9 @@ function App() {
       textAlign: "center", 
       padding: "20px 15px",
       minHeight: '100vh',
-      boxSizing: 'border-box'
+      boxSizing: 'border-box',
+      backgroundColor: profileLoaded ? backgroundColor : '#f5f5f5',
+      transition: 'background-color 0.3s ease'
     }}>
       {/* CSS Animations */}
       <style>{`
@@ -590,7 +652,8 @@ function App() {
         <h1 style={{ 
           fontSize: window.innerWidth < 768 ? "28px" : "36px", 
           fontWeight: "bold", 
-          margin: 0 
+          margin: 0,
+          color: '#333'
         }}>
           SYNKIM
         </h1>
@@ -602,38 +665,61 @@ function App() {
         }}>
           <span style={{ 
             color: '#666',
-            fontSize: window.innerWidth < 768 ? '14px' : '16px'
+            fontSize: window.innerWidth < 768 ? '14px' : '16px',
+            fontWeight: '500'
           }}>
-            Welcome, {user.email}
+            Welcome, {username || (user?.email ? user.email.split('@')[0] : 'User')}
           </span>
-          <button
-            onClick={handleSpotifyConnect}
-            style={{
-              padding: '8px 16px',
-              fontSize: '14px',
-              borderRadius: '5px',
-              backgroundColor: spotifyConnected ? '#1DB954' : '#555',
-              color: 'white',
-              border: 'none',
-              cursor: 'pointer'
-            }}
-          >
-            {spotifyConnected ? '🎵 Spotify Connected' : 'Connect Spotify'}
-          </button>
-          <button
-            onClick={handleLogout}
-            style={{
-              padding: '8px 16px',
-              fontSize: '14px',
-              borderRadius: '5px',
-              backgroundColor: '#dc3545',
-              color: 'white',
-              border: 'none',
-              cursor: 'pointer'
-            }}
-          >
-            Logout
-          </button>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={() => setShowProfileSettings(true)}
+              style={{
+                padding: '8px 16px',
+                fontSize: '14px',
+                borderRadius: '5px',
+                backgroundColor: '#6c757d',
+                color: 'white',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+              </svg>
+              Profile
+            </button>
+            <button
+              onClick={handleSpotifyConnect}
+              style={{
+                padding: '8px 16px',
+                fontSize: '14px',
+                borderRadius: '5px',
+                backgroundColor: spotifyConnected ? '#1DB954' : '#555',
+                color: 'white',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              {spotifyConnected ? '🎵 Connected' : 'Connect Spotify'}
+            </button>
+            <button
+              onClick={handleLogout}
+              style={{
+                padding: '8px 16px',
+                fontSize: '14px',
+                borderRadius: '5px',
+                backgroundColor: '#dc3545',
+                color: 'white',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
 
@@ -658,6 +744,7 @@ function App() {
             fontSize: "16px",
             borderRadius: "8px",
             border: "1px solid #ccc",
+            backgroundColor: 'rgba(255, 255, 255, 0.9)'
           }}
         />
         <button
@@ -696,11 +783,13 @@ function App() {
       <div style={{ 
         marginTop: "20px",
         padding: "15px",
-        backgroundColor: "#f8f9fa",
+        backgroundColor: "rgba(255, 255, 255, 0.9)",
         borderRadius: "8px",
         maxWidth: "600px",
         margin: "20px auto",
-        textAlign: "left"
+        textAlign: "left",
+        backdropFilter: 'blur(10px)',
+        border: '1px solid rgba(255, 255, 255, 0.2)'
       }}>
         <h3 style={{ marginBottom: "10px", color: "#333" }}>
           🎧 What's Playing
@@ -711,7 +800,7 @@ function App() {
           <div style={{
             padding: "10px",
             marginBottom: "15px",
-            backgroundColor: "#e8f5e9",
+            backgroundColor: "rgba(232, 245, 233, 0.9)",
             borderRadius: "5px",
             borderLeft: "4px solid #1DB954"
           }}>
@@ -724,7 +813,6 @@ function App() {
                 Progress: {Math.floor(spotifyTrack.progressMs / 1000)}s / 
                 {Math.floor(spotifyTrack.durationMs / 1000)}s
               </div>
-              {/* YouTube Play Button */}
               <button
                 onClick={() => handlePlayOnYouTube(spotifyTrack.song, spotifyTrack.artist, spotifyTrack.durationMs)}
                 disabled={youtubeSearchStatus?.loading}
@@ -777,12 +865,14 @@ function App() {
               <div key={userId} style={{
                 padding: "8px",
                 marginBottom: "8px",
-                backgroundColor: "#fff",
+                backgroundColor: "rgba(255, 255, 255, 0.7)",
                 borderRadius: "5px",
-                border: "1px solid #e0e0e0"
+                border: "1px solid rgba(224, 224, 224, 0.5)"
               }}>
-                <div style={{ fontWeight: "bold" }}>User {userId.substring(0, 8)}...</div>
-                <div>{data.song} - {data.artist}</div>
+                <div style={{ fontWeight: "bold", color: "#333" }}>
+                  {data.username || `User ${userId.substring(0, 8)}...`}
+                </div>
+                <div style={{ color: "#666" }}>{data.song} - {data.artist}</div>
                 {data.albumArt && (
                   <img 
                     src={data.albumArt} 
@@ -790,7 +880,6 @@ function App() {
                     style={{ width: "50px", height: "50px", marginTop: "5px", borderRadius: "3px" }}
                   />
                 )}
-                {/* YouTube Play Button for Other Users */}
                 <button
                   onClick={() => handlePlayOnYouTube(data.song, data.artist, data.durationMs)}
                   disabled={youtubeSearchStatus?.loading && youtubeSearchStatus?.song === data.song}
@@ -842,7 +931,6 @@ function App() {
           </div>
         )}
         
-        {/* Debug info - remove in production */}
         <div style={{ marginTop: "10px", fontSize: "11px", color: "#aaa" }}>
           Socket: {socketRef.current?.connected ? "Connected" : "Disconnected"} | 
           Spotify: {spotifyConnected ? "Connected" : "Not Connected"}
@@ -884,6 +972,175 @@ function App() {
               </svg>
             )}
             <span>{youtubeSearchStatus.message || (youtubeSearchStatus.loading ? "Searching YouTube..." : "")}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Profile Settings Modal */}
+      {showProfileSettings && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 2000,
+          padding: '20px'
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '30px',
+            borderRadius: '10px',
+            maxWidth: '500px',
+            width: '100%',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '25px'
+            }}>
+              <h2 style={{ margin: 0, color: '#333' }}>Profile Settings</h2>
+              <button
+                onClick={() => setShowProfileSettings(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: '#666'
+                }}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+                Username
+              </label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Enter your username"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  fontSize: '16px',
+                  borderRadius: '6px',
+                  border: '1px solid #ddd',
+                  boxSizing: 'border-box'
+                }}
+              />
+              <p style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                This name will be displayed to other users instead of your email.
+              </p>
+            </div>
+            
+            <div style={{ marginBottom: '30px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+                Background Color
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <input
+                  type="color"
+                  value={backgroundColor}
+                  onChange={(e) => setBackgroundColor(e.target.value)}
+                  style={{
+                    width: '60px',
+                    height: '40px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    borderRadius: '4px'
+                  }}
+                />
+                <div style={{
+                  width: '100%',
+                  padding: '12px',
+                  fontSize: '16px',
+                  borderRadius: '6px',
+                  border: '1px solid #ddd',
+                  backgroundColor: '#f8f9fa',
+                  fontFamily: 'monospace'
+                }}>
+                  {backgroundColor}
+                </div>
+              </div>
+              <p style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                Choose a color for your app background. Current preview below:
+              </p>
+              <div style={{
+                marginTop: '10px',
+                padding: '15px',
+                borderRadius: '6px',
+                border: '2px dashed #ddd',
+                backgroundColor: backgroundColor,
+                textAlign: 'center',
+                color: '#333'
+              }}>
+                Background Preview
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                onClick={() => setShowProfileSettings(false)}
+                style={{
+                  padding: '10px 20px',
+                  fontSize: '16px',
+                  borderRadius: '6px',
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveProfileSettings}
+                style={{
+                  padding: '10px 20px',
+                  fontSize: '16px',
+                  borderRadius: '6px',
+                  backgroundColor: '#007BFF',
+                  color: 'white',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                Save Changes
+              </button>
+            </div>
+            
+            <div style={{ marginTop: '25px', paddingTop: '20px', borderTop: '1px solid #eee' }}>
+              <h4 style={{ marginBottom: '10px', color: '#333' }}>Quick Color Presets</h4>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                {['#f0f0f0', '#e3f2fd', '#f3e5f5', '#e8f5e9', '#fff3e0', '#fce4ec', '#e0f7fa', '#f1f8e9'].map((color) => (
+                  <button
+                    key={color}
+                    onClick={() => setBackgroundColor(color)}
+                    style={{
+                      width: '40px',
+                      height: '40px',
+                      backgroundColor: color,
+                      border: backgroundColor === color ? '3px solid #007BFF' : '2px solid #ddd',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                    title={color}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -22,11 +22,13 @@ const CLIENT_SECRET = '51079ca0e6f24e6fb4007f0f3bfbc4b6';
 const REDIRECT_URI = 'https://synkim.onrender.com/callback';
 
 // YouTube API Key - Set this in Render Environment Variables
-// Go to Render Dashboard -> Your Service -> Environment -> Add YOUTUBE_API_KEY
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || 'AIzaSyAdv5C9r9363O80k9xNDiXseMLK3tArqJU';
 
 // Simple in-memory store: socketId -> { access_token, refresh_token }
 const spotifyTokens = new Map();
+
+// NEW: Store user profiles (socketId -> { username, userId })
+const userProfiles = new Map();
 
 // === SPOTIFY AUTH ENDPOINTS ===
 app.get('/spotify/login', (req, res) => {
@@ -228,7 +230,6 @@ async function searchYouTubeVideo(songName, artistName) {
     
     console.log(`🔍 Searching YouTube: "${cleanSong}" by "${cleanArtist}"`);
     
-    // Simple search query
     const query = `${cleanSong} ${cleanArtist}`;
     
     const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
@@ -283,6 +284,15 @@ async function searchYouTubeVideo(songName, artistName) {
 io.on("connection", (socket) => {
   console.log(`👤 User connected: ${socket.id}`);
 
+  // NEW: Handle username updates from frontend
+  socket.on("updateUsername", (data) => {
+    userProfiles.set(socket.id, {
+      username: data.username,
+      userId: data.userId
+    });
+    console.log(`👤 Username set for ${socket.id}: ${data.username}`);
+  });
+
   // YouTube sync events
   socket.on("play", (time) => {
     socket.broadcast.emit("play", time);
@@ -311,6 +321,7 @@ io.on("connection", (socket) => {
     socket.emit("spotifyAuthUrl", `https://synkim.onrender.com/spotify/login?socketId=${socket.id}`);
   });
 
+  // Check Spotify playback status
   socket.on("getSpotifyStatus", async () => {
     const userData = spotifyTokens.get(socket.id);
     
@@ -333,10 +344,18 @@ io.on("connection", (socket) => {
     if (trackData === 'token_expired') {
       socket.emit("spotifyStatus", { error: "token_expired" });
     } else if (trackData) {
+      // Get username for this socket
+      const userProfile = userProfiles.get(socket.id);
+      const displayName = userProfile?.username || `User ${socket.id.substring(0, 8)}`;
+      
+      // Broadcast to all other users
       socket.broadcast.emit("userListening", {
         userId: socket.id,
+        username: displayName,
         ...trackData
       });
+      
+      // Send to the requesting user too
       socket.emit("spotifyStatus", trackData);
     } else {
       socket.emit("spotifyStatus", { isPlaying: false });
@@ -384,11 +403,40 @@ io.on("connection", (socket) => {
     }
   });
 
+  // Clean up on disconnect
   socket.on("disconnect", () => {
     console.log(`👤 User disconnected: ${socket.id}`);
     spotifyTokens.delete(socket.id);
+    userProfiles.delete(socket.id);
   });
 });
+
+// === PERIODIC SPOTIFY STATUS CHECK ===
+setInterval(async () => {
+  for (const [socketId, userData] of spotifyTokens.entries()) {
+    const socket = io.sockets.sockets.get(socketId);
+    if (!socket) continue;
+
+    let access_token = userData.access_token;
+    if (Date.now() > userData.expiry) {
+      access_token = await refreshAccessToken(socketId);
+      if (!access_token) continue;
+    }
+
+    const trackData = await getCurrentTrack(access_token);
+    if (trackData && trackData !== 'token_expired' && trackData.isPlaying) {
+      // Get username for this socket
+      const userProfile = userProfiles.get(socketId);
+      const displayName = userProfile?.username || `User ${socketId.substring(0, 8)}`;
+      
+      socket.broadcast.emit("userListening", {
+        userId: socketId,
+        username: displayName,
+        ...trackData
+      });
+    }
+  }
+}, 15000);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -397,6 +445,7 @@ app.get('/health', (req, res) => {
     service: 'SYNKIM Backend',
     youtubeApi: YOUTUBE_API_KEY ? 'configured' : 'missing',
     spotifyClients: spotifyTokens.size,
+    userProfiles: userProfiles.size,
     timestamp: new Date().toISOString()
   });
 });
