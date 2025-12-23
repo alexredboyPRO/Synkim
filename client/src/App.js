@@ -152,22 +152,31 @@ function App() {
     }
   };
 
-  // Function to handle playing Spotify song on YouTube
-const handlePlayOnYouTube = (song, artist, durationMs = null) => {
-  if (!socketRef.current) {
-    alert("Not connected to server");
-    return;
-  }
-  
-  setYoutubeSearchStatus({ loading: true, song, artist });
-  
-  socketRef.current.emit("playSpotifyOnYouTube", {
-    song: song,
-    artist: artist,
-    durationMs: durationMs, // Add duration for better matching
-    userId: user?.uid || 'anonymous'
-  });
-};
+  const handlePlayOnYouTube = (song, artist, durationMs = null) => {
+    if (!socketRef.current) {
+      alert("Not connected to server");
+      return;
+    }
+    
+    // Show loading state
+    setYoutubeSearchStatus({ 
+      loading: true, 
+      song, 
+      artist,
+      message: `Searching for "${song}" on YouTube...`
+    });
+    
+    console.log(`🎯 Requesting YouTube search for: ${song} - ${artist}`);
+    
+    // Send request to backend
+    socketRef.current.emit("playSpotifyOnYouTube", {
+      song: song,
+      artist: artist,
+      durationMs: durationMs,
+      timestamp: Date.now(),
+      userId: user?.uid || 'anonymous'
+    });
+  };
 
   // Listen to auth state changes
   useEffect(() => {
@@ -301,36 +310,36 @@ const handlePlayOnYouTube = (song, artist, durationMs = null) => {
 
     // YouTube search result handler
     socketRef.current.on("youtubeSearchResult", (result) => {
-      console.log("YouTube search result:", result);
+    console.log("📨 YouTube search result received:", result);
+    
+    if (result.success) {
+      setYoutubeSearchStatus({
+        loading: false,
+        success: true,
+        message: `🎵 Now playing: ${result.song}`,
+        song: result.song,
+        artist: result.artist
+      });
       
-      if (result.success) {
-        setYoutubeSearchStatus({
-          loading: false,
-          success: true,
-          message: `Now playing ${result.song} on YouTube`,
-          song: result.song,
-          artist: result.artist
-        });
-        
-        // Clear the status message after 3 seconds
-        setTimeout(() => {
-          setYoutubeSearchStatus(null);
-        }, 3000);
-      } else {
-        setYoutubeSearchStatus({
-          loading: false,
-          success: false,
-          message: result.message || "Failed to find YouTube video",
-          song: result.song,
-          artist: result.artist
-        });
-        
-        // Clear the status message after 5 seconds
-        setTimeout(() => {
-          setYoutubeSearchStatus(null);
-        }, 5000);
-      }
-    });
+      // Clear the status message after 4 seconds
+      setTimeout(() => {
+        setYoutubeSearchStatus(null);
+      }, 4000);
+    } else {
+      setYoutubeSearchStatus({
+        loading: false,
+        success: false,
+        message: result.message || `Couldn't find "${result.song}" on YouTube`,
+        song: result.song,
+        artist: result.artist
+      });
+      
+      // Clear the status message after 6 seconds
+      setTimeout(() => {
+        setYoutubeSearchStatus(null);
+      }, 6000);
+    }
+  });
 
     return () => {
       if (socketRef.current) {
