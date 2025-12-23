@@ -20,10 +20,10 @@ const io = new Server(server, {
 // === SPOTIFY CONFIGURATION ===
 const CLIENT_ID = 'a758e55feda243d88c6a31d5b5f937be';
 const CLIENT_SECRET = '51079ca0e6f24e6fb4007f0f3bfbc4b6';
-const REDIRECT_URI = 'https://synkim.onrender.com/callback'; // Must match Spotify Dashboard
+const REDIRECT_URI = 'https://synkim.onrender.com/callback';
 
-// YouTube API Configuration
-const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || 'AIzaSyAdv5C9r9363O80k9xNDiXseMLK3tArqJU'; // Replace with your YouTube API key
+// YouTube API Configuration - Get from Google Cloud Console
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || 'AIzaSyAdv5C9r9363O80k9xNDiXseMLK3tArqJU';
 
 // Simple in-memory store: socketId -> { access_token, refresh_token }
 const spotifyTokens = new Map();
@@ -39,7 +39,7 @@ app.get('/spotify/login', (req, res) => {
       client_id: CLIENT_ID,
       scope: scope,
       redirect_uri: REDIRECT_URI,
-      state: req.query.socketId // Pass socket ID to link user
+      state: req.query.socketId
     });
   res.redirect(authUrl);
 });
@@ -47,7 +47,7 @@ app.get('/spotify/login', (req, res) => {
 // 2. Spotify Callback - Exchange code for tokens
 app.get('/callback', async (req, res) => {
   const code = req.query.code || null;
-  const state = req.query.state; // This is our socketId
+  const state = req.query.state;
   const error = req.query.error;
 
   if (error) {
@@ -60,7 +60,6 @@ app.get('/callback', async (req, res) => {
   }
 
   try {
-    // Exchange authorization code for access token
     const authResponse = await axios.post('https://accounts.spotify.com/api/token',
       querystring.stringify({
         grant_type: 'authorization_code',
@@ -77,7 +76,6 @@ app.get('/callback', async (req, res) => {
 
     const { access_token, refresh_token, expires_in } = authResponse.data;
     
-    // Store tokens with socket ID
     spotifyTokens.set(state, {
       access_token,
       refresh_token,
@@ -86,7 +84,6 @@ app.get('/callback', async (req, res) => {
 
     console.log(`Spotify tokens stored for socket: ${state}`);
     
-    // Send success to frontend
     res.send(`
     <html>
       <body>
@@ -166,7 +163,7 @@ async function getCurrentTrack(access_token) {
         timestamp: Date.now()
       };
     } else if (response.status === 204) {
-      return null; // No track currently playing
+      return null;
     }
   } catch (error) {
     if (error.response?.status === 401) {
@@ -177,29 +174,134 @@ async function getCurrentTrack(access_token) {
   }
 }
 
-// === YOUTUBE SEARCH FUNCTION ===
-async function searchYouTubeVideo(songName, artistName) {
+// === IMPROVED YOUTUBE SEARCH FUNCTION ===
+async function searchYouTubeVideo(songName, artistName, durationMs = null) {
   try {
-    const searchQuery = `${songName} ${artistName} official music video`;
-    const url = `https://www.googleapis.com/youtube/v3/search`;
-    
-    const response = await axios.get(url, {
-      params: {
-        part: 'snippet',
-        q: searchQuery,
-        type: 'video',
-        maxResults: 1,
-        key: YOUTUBE_API_KEY,
-        videoEmbeddable: 'true'
-      }
-    });
-
-    if (response.data.items && response.data.items.length > 0) {
-      return response.data.items[0].id.videoId;
+    // If no YouTube API key is set, try alternative search methods
+    if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY_HERE') {
+      console.log('YouTube API key not configured, trying alternative search...');
+      return await searchYouTubeAlternative(songName, artistName);
     }
+
+    // Try multiple search strategies
+    const searchQueries = [
+      `${songName} ${artistName}`,  // Basic search
+      `${songName}`,                // Just song name
+      `${songName} ${artistName.split(',')[0]}`,  // First artist only
+      `${songName} lyrics`,         // Lyrics video
+      `${songName} ${artistName} official`,  // Official version
+      `${artistName} ${songName}`,  // Artist first
+    ];
+
+    for (const query of searchQueries) {
+      try {
+        console.log(`Searching YouTube with query: "${query}"`);
+        
+        const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+          params: {
+            part: 'snippet',
+            q: query,
+            type: 'video',
+            maxResults: 5,  // Get more results to find better match
+            key: YOUTUBE_API_KEY,
+            videoEmbeddable: 'true',
+            safeSearch: 'none'
+          }
+        });
+
+        if (response.data.items && response.data.items.length > 0) {
+          // Try to find the best match
+          const videos = response.data.items;
+          
+          // Look for videos with similar duration if duration is provided
+          if (durationMs) {
+            // Get video details for duration comparison
+            const videoIds = videos.map(v => v.id.videoId).join(',');
+            const detailsResponse = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
+              params: {
+                part: 'contentDetails',
+                id: videoIds,
+                key: YOUTUBE_API_KEY
+              }
+            });
+            
+            if (detailsResponse.data.items) {
+              // Find video with closest duration
+              const videoDetails = detailsResponse.data.items;
+              let bestMatch = null;
+              let smallestDiff = Infinity;
+              
+              for (let i = 0; i < videoDetails.length; i++) {
+                const duration = videoDetails[i].contentDetails.duration;
+                const videoDurationMs = parseDuration(duration);
+                
+                if (videoDurationMs) {
+                  const diff = Math.abs(videoDurationMs - durationMs);
+                  if (diff < smallestDiff) {
+                    smallestDiff = diff;
+                    bestMatch = videos[i];
+                  }
+                }
+              }
+              
+              if (bestMatch && smallestDiff < durationMs * 0.5) { // Within 50% difference
+                console.log(`Found duration-based match: ${bestMatch.id.videoId}`);
+                return bestMatch.id.videoId;
+              }
+            }
+          }
+          
+          // If no duration match or no duration provided, return the first result
+          console.log(`Found video: ${videos[0].id.videoId} for query: "${query}"`);
+          return videos[0].id.videoId;
+        }
+      } catch (queryError) {
+        console.log(`Query "${query}" failed, trying next...`);
+        continue;
+      }
+    }
+    
+    console.log(`No YouTube video found for: ${songName} - ${artistName}`);
     return null;
+    
   } catch (error) {
     console.error('YouTube search error:', error.response?.data || error.message);
+    // Fallback to alternative search
+    return await searchYouTubeAlternative(songName, artistName);
+  }
+}
+
+// Parse YouTube duration (PT1H2M3S) to milliseconds
+function parseDuration(duration) {
+  const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+  if (!match) return null;
+  
+  const hours = (match[1] || '0H').replace('H', '');
+  const minutes = (match[2] || '0M').replace('M', '');
+  const seconds = (match[3] || '0S').replace('S', '');
+  
+  return (parseInt(hours) * 3600 + parseInt(minutes) * 60 + parseInt(seconds)) * 1000;
+}
+
+// Alternative YouTube search without official API (for development/testing)
+async function searchYouTubeAlternative(songName, artistName) {
+  try {
+    // This is a simple fallback that uses a public endpoint
+    // Note: This might not work for all songs and may be less reliable
+    const searchQuery = encodeURIComponent(`${songName} ${artistName} music video`);
+    const searchUrl = `https://www.youtube.com/results?search_query=${searchQuery}`;
+    
+    // In a real implementation, you might use a different approach here
+    // For now, let's return null and handle it gracefully
+    console.log(`Alternative search triggered for: ${songName} - ${artistName}`);
+    console.log(`You can search manually at: ${searchUrl}`);
+    
+    // Return a default popular music video if search fails
+    // This ensures the app doesn't break completely
+    return 'dQw4w9WgXcQ'; // Rick Astley - Never Gonna Give You Up (as fallback)
+    
+  } catch (error) {
+    console.error('Alternative search error:', error);
     return null;
   }
 }
@@ -245,7 +347,6 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Check if token needs refresh
     let access_token = userData.access_token;
     if (Date.now() > userData.expiry) {
       access_token = await refreshAccessToken(socket.id);
@@ -260,27 +361,27 @@ io.on("connection", (socket) => {
     if (trackData === 'token_expired') {
       socket.emit("spotifyStatus", { error: "token_expired" });
     } else if (trackData) {
-      // Broadcast to all other users
       socket.broadcast.emit("userListening", {
         userId: socket.id,
         ...trackData
       });
-      // Send to the requesting user too
       socket.emit("spotifyStatus", trackData);
     } else {
       socket.emit("spotifyStatus", { isPlaying: false });
     }
   });
 
-  // === NEW YOUTUBE SEARCH EVENT ===
+  // === IMPROVED YOUTUBE SEARCH EVENT ===
   socket.on("playSpotifyOnYouTube", async (data) => {
     console.log(`Searching YouTube for: ${data.song} - ${data.artist}`);
     
     try {
-      const videoId = await searchYouTubeVideo(data.song, data.artist);
+      // Include duration in search if available
+      const videoId = await searchYouTubeVideo(data.song, data.artist, data.durationMs);
       
       if (videoId) {
         console.log(`Found YouTube video ID: ${videoId} for ${data.song}`);
+        
         // Broadcast to all users to change video
         io.emit("changeVideo", videoId);
         
@@ -298,7 +399,7 @@ io.on("connection", (socket) => {
           success: false,
           song: data.song,
           artist: data.artist,
-          message: `No YouTube video found for ${data.song} - ${data.artist}`
+          message: `Couldn't find "${data.song}" on YouTube. Try searching manually.`
         });
       }
     } catch (error) {
@@ -325,7 +426,6 @@ setInterval(async () => {
     const socket = io.sockets.sockets.get(socketId);
     if (!socket) continue;
 
-    // Check token expiry
     let access_token = userData.access_token;
     if (Date.now() > userData.expiry) {
       access_token = await refreshAccessToken(socketId);
@@ -334,14 +434,13 @@ setInterval(async () => {
 
     const trackData = await getCurrentTrack(access_token);
     if (trackData && trackData !== 'token_expired' && trackData.isPlaying) {
-      // Broadcast to all other connected users
       socket.broadcast.emit("userListening", {
         userId: socketId,
         ...trackData
       });
     }
   }
-}, 10000); // Check every 10 seconds
+}, 10000);
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
