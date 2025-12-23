@@ -41,9 +41,8 @@ function App() {
   const [isLogin, setIsLogin] = useState(true);
   const [authError, setAuthError] = useState("");
 
-  // Spotify states
+  // Spotify states - REMOVED unused spotifyAuthUrl
   const [spotifyConnected, setSpotifyConnected] = useState(false);
-  const [spotifyAuthUrl, setSpotifyAuthUrl] = useState("");
   const [spotifyTrack, setSpotifyTrack] = useState(null);
   const [userListening, setUserListening] = useState({});
 
@@ -186,10 +185,9 @@ function App() {
       setIsPlaylist(true);
     });
 
-    // Spotify event handlers
+    // Spotify event handlers - UPDATED to remove setSpotifyAuthUrl
     socketRef.current.on("spotifyAuthUrl", (url) => {
-      setSpotifyAuthUrl(url);
-      // Open Spotify login in a popup
+      // Open Spotify login in a popup directly
       const popup = window.open(url, "Spotify Login", "width=600,height=700");
       // Check if popup was blocked
       if (!popup || popup.closed) {
