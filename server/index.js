@@ -3,12 +3,9 @@ const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const axios = require('axios');
-const querystring = require('querystring');
-require('dotenv').config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
 
 const server = http.createServer(app);
 
@@ -24,16 +21,9 @@ const CLIENT_ID = 'a758e55feda243d88c6a31d5b5f937be';
 const CLIENT_SECRET = '51079ca0e6f24e6fb4007f0f3bfbc4b6';
 const REDIRECT_URI = 'https://synkim.onrender.com/callback';
 
-// YouTube API Configuration - GET THIS FROM GOOGLE CLOUD CONSOLE
+// YouTube API Key - Set this in Render Environment Variables
+// Go to Render Dashboard -> Your Service -> Environment -> Add YOUTUBE_API_KEY
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || 'AIzaSyAdv5C9r9363O80k9xNDiXseMLK3tArqJU';
-
-// Check if YouTube API key is properly configured
-if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY === 'AIzaSyAdv5C9r9363O80k9xNDiXseMLK3tArqJU') {
-  console.warn('⚠️  WARNING: Using placeholder YouTube API key. Get a real key from Google Cloud Console!');
-  console.warn('  1. Go to https://console.cloud.google.com/');
-  console.warn('  2. Create a project and enable "YouTube Data API v3"');
-  console.warn('  3. Create an API key and set it as YOUTUBE_API_KEY environment variable');
-}
 
 // Simple in-memory store: socketId -> { access_token, refresh_token }
 const spotifyTokens = new Map();
@@ -42,13 +32,13 @@ const spotifyTokens = new Map();
 app.get('/spotify/login', (req, res) => {
   const scope = 'user-read-currently-playing';
   const authUrl = 'https://accounts.spotify.com/authorize?' +
-    querystring.stringify({
+    new URLSearchParams({
       response_type: 'code',
       client_id: CLIENT_ID,
       scope: scope,
       redirect_uri: REDIRECT_URI,
       state: req.query.socketId
-    });
+    }).toString();
   res.redirect(authUrl);
 });
 
@@ -67,19 +57,17 @@ app.get('/callback', async (req, res) => {
   }
 
   try {
-    const authResponse = await axios.post('https://accounts.spotify.com/api/token',
-      querystring.stringify({
-        grant_type: 'authorization_code',
-        code: code,
-        redirect_uri: REDIRECT_URI,
-      }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': 'Basic ' + Buffer.from(CLIENT_ID + ':' + CLIENT_SECRET).toString('base64')
-        }
+    const params = new URLSearchParams();
+    params.append('grant_type', 'authorization_code');
+    params.append('code', code);
+    params.append('redirect_uri', REDIRECT_URI);
+
+    const authResponse = await axios.post('https://accounts.spotify.com/api/token', params, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + Buffer.from(CLIENT_ID + ':' + CLIENT_SECRET).toString('base64')
       }
-    );
+    });
 
     const { access_token, refresh_token, expires_in } = authResponse.data;
     
@@ -93,23 +81,60 @@ app.get('/callback', async (req, res) => {
     
     res.send(`
     <html>
+      <head>
+        <title>Spotify Authorization</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #1DB954, #191414);
+            color: white;
+          }
+          .container {
+            text-align: center;
+            padding: 40px;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+          }
+          .success {
+            font-size: 24px;
+            margin-bottom: 20px;
+          }
+          .close-btn {
+            background: #1DB954;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 20px;
+          }
+        </style>
+      </head>
       <body>
+        <div class="container">
+          <div class="success">✅ Authorization successful!</div>
+          <p>You can now close this window and return to SYNKIM.</p>
+          <button class="close-btn" onclick="window.close()">Close Window</button>
+        </div>
         <script>
           if (window.opener) {
             window.opener.postMessage('spotify_auth_success', '*');
           }
-          setTimeout(() => window.close(), 500);
         </script>
-        <p style="text-align: center; margin-top: 50px; font-family: sans-serif;">
-          ✅ Authorization successful! You can close this window.
-        </p>
       </body>
     </html>
     `);
 
   } catch (error) {
     console.error('❌ Error exchanging token:', error.response?.data || error.message);
-    res.send('Error during authentication');
+    res.send('<html><body><h2>Authentication failed. Please try again.</h2></body></html>');
   }
 });
 
@@ -119,18 +144,16 @@ async function refreshAccessToken(socketId) {
   if (!userData?.refresh_token) return null;
 
   try {
-    const response = await axios.post('https://accounts.spotify.com/api/token',
-      querystring.stringify({
-        grant_type: 'refresh_token',
-        refresh_token: userData.refresh_token,
-      }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': 'Basic ' + Buffer.from(CLIENT_ID + ':' + CLIENT_SECRET).toString('base64')
-        }
+    const params = new URLSearchParams();
+    params.append('grant_type', 'refresh_token');
+    params.append('refresh_token', userData.refresh_token);
+
+    const response = await axios.post('https://accounts.spotify.com/api/token', params, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + Buffer.from(CLIENT_ID + ':' + CLIENT_SECRET).toString('base64')
       }
-    );
+    });
 
     const { access_token, expires_in } = response.data;
     
@@ -173,12 +196,12 @@ async function getCurrentTrack(access_token) {
     if (error.response?.status === 401) {
       return 'token_expired';
     }
-    console.error('❌ Error fetching current track:', error.response?.data || error.message);
+    console.error('❌ Error fetching current track:', error.message);
     return null;
   }
 }
 
-// === IMPROVED YOUTUBE SEARCH FUNCTION ===
+// === YOUTUBE SEARCH FUNCTION ===
 function cleanSongTitle(title) {
   if (!title) return '';
   return title
@@ -198,116 +221,69 @@ function cleanArtistName(artist) {
   return artist.split(',')[0].split('&')[0].split('feat.')[0].trim();
 }
 
-async function searchYouTubeVideo(songName, artistName, durationMs = null) {
-  console.log(`\n🎵 Searching YouTube for: "${songName}" by "${artistName}"`);
-  
-  // Clean the inputs
-  const cleanSong = cleanSongTitle(songName);
-  const cleanArtist = cleanArtistName(artistName);
-  
-  console.log(`🧹 Cleaned to: "${cleanSong}" by "${cleanArtist}"`);
-  
-  // Create multiple search query variations
-  const searchQueries = [
-    `${cleanSong} ${cleanArtist}`,                    // Standard
-    `${cleanSong}`,                                   // Just song name
-    `${cleanArtist} ${cleanSong}`,                    // Artist first
-    `${cleanSong} ${cleanArtist} official`,           // Official version
-    `${cleanSong} ${cleanArtist} music video`,        // Music video
-    `${cleanSong} ${cleanArtist} audio`,              // Audio version
-    `${cleanSong} lyrics ${cleanArtist}`,             // Lyrics
-    `${cleanSong} ${cleanArtist.split(' ')[0]}`,      // First word of artist
-  ];
-
-  // Remove duplicates
-  const uniqueQueries = [...new Set(searchQueries.filter(q => q.length > 3))];
-  
-  console.log(`🔍 Trying ${uniqueQueries.length} search queries...`);
-
-  for (const query of uniqueQueries) {
-    try {
-      console.log(`   Trying: "${query}"`);
-      
-      const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-        params: {
-          part: 'snippet',
-          q: query,
-          type: 'video',
-          maxResults: 5,
-          key: YOUTUBE_API_KEY,
-          videoEmbeddable: 'true',
-          safeSearch: 'none'
-        },
-        timeout: 5000
-      });
-
-      if (response.data.items && response.data.items.length > 0) {
-        const video = response.data.items[0];
-        console.log(`✅ Found video: "${video.snippet.title}" (ID: ${video.id.videoId})`);
-        console.log(`🔗 https://www.youtube.com/watch?v=${video.id.videoId}`);
-        return video.id.videoId;
-      }
-      
-    } catch (error) {
-      // Log API errors but continue to next query
-      if (error.response) {
-        console.log(`   ❌ API Error for query "${query}": ${error.response.status} ${error.response.statusText}`);
-        if (error.response.status === 403) {
-          console.log('   ⚠️  YouTube API quota may be exceeded or key invalid');
-          break; // Stop trying if we get auth errors
-        }
-      }
-      continue; // Try next query
-    }
-  }
-  
-  // If all queries fail, try a fallback search
-  console.log('🔄 All queries failed, trying fallback...');
-  return await youtubeFallbackSearch(cleanSong, cleanArtist);
-}
-
-async function youtubeFallbackSearch(songName, artistName) {
+async function searchYouTubeVideo(songName, artistName) {
   try {
-    // Try one more time with a very simple query
-    const simpleQuery = `${songName} ${artistName}`.substring(0, 50);
+    const cleanSong = cleanSongTitle(songName);
+    const cleanArtist = cleanArtistName(artistName);
+    
+    console.log(`🔍 Searching YouTube: "${cleanSong}" by "${cleanArtist}"`);
+    
+    // Simple search query
+    const query = `${cleanSong} ${cleanArtist}`;
     
     const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
       params: {
         part: 'snippet',
-        q: simpleQuery,
+        q: query,
         type: 'video',
         maxResults: 1,
-        key: YOUTUBE_API_KEY
+        key: YOUTUBE_API_KEY,
+        videoEmbeddable: 'true'
       }
     });
 
     if (response.data.items && response.data.items.length > 0) {
-      return response.data.items[0].id.videoId;
+      const video = response.data.items[0];
+      console.log(`✅ Found: "${video.snippet.title}"`);
+      return video.id.videoId;
     }
     
-    // Ultimate fallback: Return popular music videos based on genre
-    const fallbackVideos = {
-      'pop': 'kJQP7kiw5Fk',    // Despacito
-      'hiphop': 'JGhoLcsr8GA', // Congratulations
-      'rock': 'fJ9rUzIMcZQ',   // Bohemian Rhapsody
-      'edm': '60ItHLz5WEA',    // Faded
-      'default': 'dQw4w9WgXcQ' // Never Gonna Give You Up
-    };
+    // If first search fails, try without artist
+    const response2 = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+      params: {
+        part: 'snippet',
+        q: cleanSong,
+        type: 'video',
+        maxResults: 1,
+        key: YOUTUBE_API_KEY,
+        videoEmbeddable: 'true'
+      }
+    });
+
+    if (response2.data.items && response2.data.items.length > 0) {
+      const video = response2.data.items[0];
+      console.log(`✅ Found (song only): "${video.snippet.title}"`);
+      return video.id.videoId;
+    }
     
-    console.log(`🎯 Using fallback video for "${songName}"`);
-    return fallbackVideos.default;
+    console.log(`❌ No results for "${cleanSong}"`);
+    return null;
     
   } catch (error) {
-    console.error('❌ Fallback search failed:', error.message);
-    return 'dQw4w9WgXcQ'; // Always have a fallback
+    console.error('❌ YouTube search error:', error.message);
+    if (error.response) {
+      console.error('Status:', error.response.status);
+      console.error('Data:', error.response.data);
+    }
+    return null;
   }
 }
 
 // === SOCKET.IO SETUP ===
 io.on("connection", (socket) => {
-  console.log(`\n👤 User connected: ${socket.id}`);
+  console.log(`👤 User connected: ${socket.id}`);
 
-  // === YOUTUBE SYNC EVENTS ===
+  // YouTube sync events
   socket.on("play", (time) => {
     socket.broadcast.emit("play", time);
   });
@@ -329,7 +305,7 @@ io.on("connection", (socket) => {
     socket.broadcast.emit("changePlaylist", newPlaylistId);
   });
 
-  // === SPOTIFY EVENTS ===
+  // Spotify events
   socket.on("spotifyLogin", () => {
     console.log(`🎵 Spotify login requested by: ${socket.id}`);
     socket.emit("spotifyAuthUrl", `https://synkim.onrender.com/spotify/login?socketId=${socket.id}`);
@@ -367,26 +343,20 @@ io.on("connection", (socket) => {
     }
   });
 
-  // === YOUTUBE SEARCH EVENT ===
+  // YouTube search event
   socket.on("playSpotifyOnYouTube", async (data) => {
-    console.log(`\n🎯 YouTube search requested by ${socket.id}`);
-    console.log(`📀 Song: ${data.song}`);
-    console.log(`🎤 Artist: ${data.artist}`);
-    console.log(`⏱️  Duration: ${data.durationMs ? Math.floor(data.durationMs/1000) + 's' : 'N/A'}`);
+    console.log(`\n🎯 YouTube search requested for: ${data.song} - ${data.artist}`);
     
     try {
-      const startTime = Date.now();
-      const videoId = await searchYouTubeVideo(data.song, data.artist, data.durationMs);
-      const searchTime = Date.now() - startTime;
+      const videoId = await searchYouTubeVideo(data.song, data.artist);
       
       if (videoId) {
-        console.log(`✅ Search successful in ${searchTime}ms`);
-        console.log(`🔗 Found YouTube ID: ${videoId}`);
+        console.log(`✅ Found video ID: ${videoId}`);
         
-        // Broadcast to ALL users (including sender)
+        // Broadcast to all users
         io.emit("changeVideo", videoId);
         
-        // Send success response
+        // Notify requester
         socket.emit("youtubeSearchResult", {
           success: true,
           videoId: videoId,
@@ -394,84 +364,68 @@ io.on("connection", (socket) => {
           artist: data.artist,
           message: `Now playing "${data.song}" on YouTube`
         });
-        
-        console.log(`📡 Video change broadcasted to all users`);
       } else {
-        console.log(`❌ No video found for "${data.song}"`);
+        console.log(`❌ No video found`);
         socket.emit("youtubeSearchResult", {
           success: false,
           song: data.song,
           artist: data.artist,
-          message: `Couldn't find "${data.song}" on YouTube. Try a different song or check your API key.`
+          message: `Couldn't find "${data.song}" on YouTube. Try searching manually.`
         });
       }
     } catch (error) {
-      console.error('🚨 YouTube search error:', error);
+      console.error('🚨 Search error:', error.message);
       socket.emit("youtubeSearchResult", {
         success: false,
         song: data.song,
         artist: data.artist,
-        message: `Search error: ${error.message}. Please try again.`
+        message: 'Error searching YouTube. Please try again.'
       });
     }
   });
 
-  // Clean up on disconnect
   socket.on("disconnect", () => {
     console.log(`👤 User disconnected: ${socket.id}`);
     spotifyTokens.delete(socket.id);
   });
 });
 
-// === PERIODIC SPOTIFY STATUS CHECK ===
-setInterval(async () => {
-  for (const [socketId, userData] of spotifyTokens.entries()) {
-    const socket = io.sockets.sockets.get(socketId);
-    if (!socket) continue;
-
-    let access_token = userData.access_token;
-    if (Date.now() > userData.expiry) {
-      access_token = await refreshAccessToken(socketId);
-      if (!access_token) continue;
-    }
-
-    const trackData = await getCurrentTrack(access_token);
-    if (trackData && trackData !== 'token_expired' && trackData.isPlaying) {
-      socket.broadcast.emit("userListening", {
-        userId: socketId,
-        ...trackData
-      });
-    }
-  }
-}, 15000); // Check every 15 seconds
-
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    youtubeApiKey: YOUTUBE_API_KEY ? 'configured' : 'missing',
+    service: 'SYNKIM Backend',
+    youtubeApi: YOUTUBE_API_KEY ? 'configured' : 'missing',
     spotifyClients: spotifyTokens.size,
     timestamp: new Date().toISOString()
   });
 });
 
-// Debug endpoint to test YouTube search
-app.get('/test-youtube-search', async (req, res) => {
-  const { song, artist } = req.query;
-  
-  if (!song || !artist) {
-    return res.json({ error: 'Please provide song and artist parameters' });
-  }
+// Test endpoint for YouTube search
+app.get('/test-search', async (req, res) => {
+  const { song = 'Let Me Love You', artist = 'DJ Snake' } = req.query;
   
   try {
     const videoId = await searchYouTubeVideo(song, artist);
-    res.json({
-      success: !!videoId,
-      videoId: videoId,
-      song: song,
-      artist: artist,
-      youtubeUrl: videoId ? `https://www.youtube.com/watch?v=${videoId}` : null
-    });
+    
+    if (videoId) {
+      res.json({
+        success: true,
+        song: song,
+        artist: artist,
+        videoId: videoId,
+        youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
+        message: 'Search successful!'
+      });
+    } else {
+      res.json({
+        success: false,
+        song: song,
+        artist: artist,
+        message: 'No video found',
+        youtubeApiKey: YOUTUBE_API_KEY ? 'configured' : 'missing'
+      });
+    }
   } catch (error) {
     res.json({
       success: false,
@@ -484,11 +438,15 @@ app.get('/test-youtube-search', async (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`\n🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Health check: http://localhost:${PORT}/health`);
-  console.log(`🔧 Test search: http://localhost:${PORT}/test-youtube-search?song=Let+Me+Love+You&artist=DJ+Snake`);
-  console.log(`📺 YouTube API Key: ${YOUTUBE_API_KEY ? 'Configured' : 'MISSING!'}`);
-  if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY.includes('YOUR_')) {
-    console.log('⚠️  WARNING: You need a valid YouTube API key!');
+  console.log(`\n🚀 SYNKIM Backend Server started on port ${PORT}`);
+  console.log(`📡 Health check: http://localhost:${PORT}/health`);
+  console.log(`🔧 Test search: http://localhost:${PORT}/test-search?song=Let+Me+Love+You&artist=DJ+Snake`);
+  console.log(`🎯 YouTube API Key: ${YOUTUBE_API_KEY ? 'Configured' : '⚠️  MISSING - Get one from Google Cloud Console!'}`);
+  
+  if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY.includes('AIzaSyAdv5C9r9363O80k9xNDiXseMLK3tArqJU')) {
+    console.log('\n⚠️  IMPORTANT: You need a valid YouTube API Key!');
+    console.log('1. Go to: https://console.cloud.google.com/');
+    console.log('2. Create project → Enable "YouTube Data API v3"');
+    console.log('3. Create API key → Add to Render Environment as YOUTUBE_API_KEY');
   }
 });
