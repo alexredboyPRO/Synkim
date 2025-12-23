@@ -20,7 +20,7 @@ const io = new Server(server, {
 // === SPOTIFY CONFIGURATION ===
 const CLIENT_ID = 'a758e55feda243d88c6a31d5b5f937be';
 const CLIENT_SECRET = '51079ca0e6f24e6fb4007f0f3bfbc4b6';
-const REDIRECT_URI = 'https://alexredboypro.github.io/Synkim/'; // Must match Spotify Dashboard
+const REDIRECT_URI = 'https://synkim.onrender.com/callback'; // Must match Spotify Dashboard
 
 // Simple in-memory store: socketId -> { access_token, refresh_token }
 const spotifyTokens = new Map();
@@ -199,7 +199,7 @@ io.on("connection", (socket) => {
   
   // Request to start Spotify login
   socket.on("spotifyLogin", () => {
-    socket.emit("spotifyAuthUrl", `http://localhost:3001/spotify/login?socketId=${socket.id}`);
+    socket.emit("spotifyAuthUrl", `https://synkim.onrender.com/spotify/login?socketId=${socket.id}`);
   });
 
   // Check Spotify playback status
