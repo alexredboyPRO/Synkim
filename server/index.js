@@ -85,16 +85,20 @@ app.get('/callback', async (req, res) => {
     
     // Send success to frontend
     res.send(`
-      <html>
-        <body>
-          <h2>Spotify Connected Successfully!</h2>
-          <p>You can close this window and return to the app.</p>
-          <script>
-            window.close();
-          </script>
-        </body>
-      </html>
-    `);
+    <html>
+      <body>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage('spotify_auth_success', '*');
+          }
+          setTimeout(() => window.close(), 500);
+       </script>
+       <p style="text-align: center; margin-top: 50px; font-family: sans-serif;">
+         Authorization successful! You can close this window.
+       </p>
+     </body>
+   </html>
+  `);
 
   } catch (error) {
     console.error('Error exchanging token:', error.response?.data || error.message);
