@@ -41,10 +41,39 @@ function App() {
   const [isLogin, setIsLogin] = useState(true);
   const [authError, setAuthError] = useState("");
 
-  // Spotify states - REMOVED unused spotifyAuthUrl
+  // Spotify states
   const [spotifyConnected, setSpotifyConnected] = useState(false);
   const [spotifyTrack, setSpotifyTrack] = useState(null);
   const [userListening, setUserListening] = useState({});
+
+  // === ADD THIS NEW useEffect FOR POPUP MESSAGES ===
+  // Listen for messages from the Spotify auth popup
+  useEffect(() => {
+    const handleMessage = (event) => {
+      console.log("Message received from popup:", event.data);
+      // Check for our success message
+      if (event.data === 'spotify_auth_success') {
+        console.log('Spotify authentication successful!');
+        // Update UI state to show connected
+        setSpotifyConnected(true);
+        // Immediately request the current status from backend
+        if (socketRef.current) {
+          console.log('Requesting Spotify status...');
+          socketRef.current.emit('getSpotifyStatus');
+        }
+      }
+    };
+
+    // Add the event listener
+    window.addEventListener('message', handleMessage);
+    console.log("Message listener added for Spotify auth");
+
+    // Clean up the listener when component unmounts
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      console.log("Message listener removed");
+    };
+  }, []); // Empty dependency array means this runs once on mount
 
   // Extract video ID or playlist ID
   function extractYouTubeId(url) {
@@ -102,13 +131,21 @@ function App() {
     }
   };
 
-  // Spotify connect function
+  // Spotify connect function - WITH DEBUG LOGGING
   const handleSpotifyConnect = () => {
+    console.log("Spotify connect button clicked");
+    console.log("Socket exists?", !!socketRef.current);
+    console.log("Socket connected?", socketRef.current?.connected);
+    console.log("Spotify connected state:", spotifyConnected);
+    
     if (!spotifyConnected && socketRef.current) {
+      console.log("Emitting spotifyLogin event...");
       socketRef.current.emit("spotifyLogin");
     } else if (spotifyConnected) {
-      // Already connected - show current status
+      console.log("Already connected, getting status...");
       socketRef.current.emit("getSpotifyStatus");
+    } else {
+      console.log("No socket connection available");
     }
   };
 
@@ -127,7 +164,25 @@ function App() {
   useEffect(() => {
     if (!user) return;
 
-    socketRef.current = io(SOCKET_URL);
+    console.log("Connecting to socket server...");
+    socketRef.current = io(SOCKET_URL, {
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
+
+    // Add connection event listeners
+    socketRef.current.on("connect", () => {
+      console.log("Socket connected with ID:", socketRef.current.id);
+    });
+
+    socketRef.current.on("connect_error", (error) => {
+      console.error("Socket connection error:", error);
+    });
+
+    socketRef.current.on("disconnect", (reason) => {
+      console.log("Socket disconnected:", reason);
+    });
 
     // YouTube sync events
     socketRef.current.on("play", (time) => {
@@ -185,17 +240,22 @@ function App() {
       setIsPlaylist(true);
     });
 
-    // Spotify event handlers - UPDATED to remove setSpotifyAuthUrl
+    // Spotify event handlers
     socketRef.current.on("spotifyAuthUrl", (url) => {
+      console.log("Received Spotify auth URL:", url);
       // Open Spotify login in a popup directly
       const popup = window.open(url, "Spotify Login", "width=600,height=700");
       // Check if popup was blocked
       if (!popup || popup.closed) {
         alert("Popup blocked! Please allow popups for this site.");
+        console.error("Popup was blocked by browser");
+      } else {
+        console.log("Spotify login popup opened successfully");
       }
     });
 
     socketRef.current.on("spotifyStatus", (data) => {
+      console.log("Received Spotify status:", data);
       if (data.error === "not_connected") {
         setSpotifyConnected(false);
         setSpotifyTrack(null);
@@ -212,13 +272,19 @@ function App() {
     });
 
     socketRef.current.on("userListening", (data) => {
+      console.log("User listening data received:", data);
       setUserListening(prev => ({
         ...prev,
         [data.userId]: data
       }));
     });
 
-    return () => socketRef.current.disconnect();
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        console.log("Socket disconnected");
+      }
+    };
   }, [user]);
 
   // Periodically check Spotify status
@@ -226,6 +292,7 @@ function App() {
     if (!socketRef.current || !spotifyConnected) return;
     
     const interval = setInterval(() => {
+      console.log("Auto-checking Spotify status...");
       socketRef.current.emit("getSpotifyStatus");
     }, 15000); // Check every 15 seconds
     
@@ -234,14 +301,18 @@ function App() {
 
   const onReady = (event) => {
     playerRef.current = event.target;
+    console.log("YouTube player ready");
 
     // Continuous sync every 3 seconds
-    setInterval(() => {
+    const syncInterval = setInterval(() => {
       if (playerRef.current && !isRemoteAction.current) {
         const t = playerRef.current.getCurrentTime();
         socketRef.current.emit("sync", t);
       }
     }, 3000);
+    
+    // Store interval for cleanup
+    return () => clearInterval(syncInterval);
   };
 
   const onPlay = () => {
@@ -613,6 +684,12 @@ function App() {
             Connect Spotify to share what you're listening to!
           </div>
         )}
+        
+        {/* Debug info - remove in production */}
+        <div style={{ marginTop: "10px", fontSize: "11px", color: "#aaa" }}>
+          Socket: {socketRef.current?.connected ? "Connected" : "Disconnected"} | 
+          Spotify: {spotifyConnected ? "Connected" : "Not Connected"}
+        </div>
       </div>
 
       <p style={{ 
