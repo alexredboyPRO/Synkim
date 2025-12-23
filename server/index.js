@@ -22,6 +22,9 @@ const CLIENT_ID = 'a758e55feda243d88c6a31d5b5f937be';
 const CLIENT_SECRET = '51079ca0e6f24e6fb4007f0f3bfbc4b6';
 const REDIRECT_URI = 'https://synkim.onrender.com/callback'; // Must match Spotify Dashboard
 
+// YouTube API Configuration
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || 'AIzaSyAdv5C9r9363O80k9xNDiXseMLK3tArqJU'; // Replace with your YouTube API key
+
 // Simple in-memory store: socketId -> { access_token, refresh_token }
 const spotifyTokens = new Map();
 
@@ -174,6 +177,33 @@ async function getCurrentTrack(access_token) {
   }
 }
 
+// === YOUTUBE SEARCH FUNCTION ===
+async function searchYouTubeVideo(songName, artistName) {
+  try {
+    const searchQuery = `${songName} ${artistName} official music video`;
+    const url = `https://www.googleapis.com/youtube/v3/search`;
+    
+    const response = await axios.get(url, {
+      params: {
+        part: 'snippet',
+        q: searchQuery,
+        type: 'video',
+        maxResults: 1,
+        key: YOUTUBE_API_KEY,
+        videoEmbeddable: 'true'
+      }
+    });
+
+    if (response.data.items && response.data.items.length > 0) {
+      return response.data.items[0].id.videoId;
+    }
+    return null;
+  } catch (error) {
+    console.error('YouTube search error:', error.response?.data || error.message);
+    return null;
+  }
+}
+
 // === SOCKET.IO SETUP ===
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
@@ -239,6 +269,46 @@ io.on("connection", (socket) => {
       socket.emit("spotifyStatus", trackData);
     } else {
       socket.emit("spotifyStatus", { isPlaying: false });
+    }
+  });
+
+  // === NEW YOUTUBE SEARCH EVENT ===
+  socket.on("playSpotifyOnYouTube", async (data) => {
+    console.log(`Searching YouTube for: ${data.song} - ${data.artist}`);
+    
+    try {
+      const videoId = await searchYouTubeVideo(data.song, data.artist);
+      
+      if (videoId) {
+        console.log(`Found YouTube video ID: ${videoId} for ${data.song}`);
+        // Broadcast to all users to change video
+        io.emit("changeVideo", videoId);
+        
+        // Notify the user who requested it
+        socket.emit("youtubeSearchResult", {
+          success: true,
+          videoId: videoId,
+          song: data.song,
+          artist: data.artist,
+          message: `Now playing ${data.song} on YouTube`
+        });
+      } else {
+        console.log(`No YouTube video found for: ${data.song}`);
+        socket.emit("youtubeSearchResult", {
+          success: false,
+          song: data.song,
+          artist: data.artist,
+          message: `No YouTube video found for ${data.song} - ${data.artist}`
+        });
+      }
+    } catch (error) {
+      console.error('Error in YouTube search:', error);
+      socket.emit("youtubeSearchResult", {
+        success: false,
+        song: data.song,
+        artist: data.artist,
+        message: 'Error searching for YouTube video. Please try again.'
+      });
     }
   });
 

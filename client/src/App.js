@@ -46,6 +46,9 @@ function App() {
   const [spotifyTrack, setSpotifyTrack] = useState(null);
   const [userListening, setUserListening] = useState({});
 
+  // YouTube search states
+  const [youtubeSearchStatus, setYoutubeSearchStatus] = useState(null);
+
   // === ADD THIS NEW useEffect FOR POPUP MESSAGES ===
   // Listen for messages from the Spotify auth popup
   useEffect(() => {
@@ -147,6 +150,22 @@ function App() {
     } else {
       console.log("No socket connection available");
     }
+  };
+
+  // Function to handle playing Spotify song on YouTube
+  const handlePlayOnYouTube = (song, artist) => {
+    if (!socketRef.current) {
+      alert("Not connected to server");
+      return;
+    }
+    
+    setYoutubeSearchStatus({ loading: true, song, artist });
+    
+    socketRef.current.emit("playSpotifyOnYouTube", {
+      song: song,
+      artist: artist,
+      userId: user?.uid || 'anonymous'
+    });
   };
 
   // Listen to auth state changes
@@ -277,6 +296,39 @@ function App() {
         ...prev,
         [data.userId]: data
       }));
+    });
+
+    // YouTube search result handler
+    socketRef.current.on("youtubeSearchResult", (result) => {
+      console.log("YouTube search result:", result);
+      
+      if (result.success) {
+        setYoutubeSearchStatus({
+          loading: false,
+          success: true,
+          message: `Now playing ${result.song} on YouTube`,
+          song: result.song,
+          artist: result.artist
+        });
+        
+        // Clear the status message after 3 seconds
+        setTimeout(() => {
+          setYoutubeSearchStatus(null);
+        }, 3000);
+      } else {
+        setYoutubeSearchStatus({
+          loading: false,
+          success: false,
+          message: result.message || "Failed to find YouTube video",
+          song: result.song,
+          artist: result.artist
+        });
+        
+        // Clear the status message after 5 seconds
+        setTimeout(() => {
+          setYoutubeSearchStatus(null);
+        }, 5000);
+      }
     });
 
     return () => {
@@ -500,6 +552,22 @@ function App() {
       minHeight: '100vh',
       boxSizing: 'border-box'
     }}>
+      {/* CSS Animations */}
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        @keyframes slideIn {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes fadeOut {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+      `}</style>
+
       {/* Header */}
       <div style={{ 
         display: 'flex', 
@@ -646,6 +714,45 @@ function App() {
                 Progress: {Math.floor(spotifyTrack.progressMs / 1000)}s / 
                 {Math.floor(spotifyTrack.durationMs / 1000)}s
               </div>
+              {/* YouTube Play Button */}
+              <button
+                onClick={() => handlePlayOnYouTube(spotifyTrack.song, spotifyTrack.artist)}
+                disabled={youtubeSearchStatus?.loading}
+                style={{
+                  marginTop: "10px",
+                  padding: "8px 16px",
+                  backgroundColor: "#FF0000",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor: youtubeSearchStatus?.loading && youtubeSearchStatus?.song === spotifyTrack.song ? "not-allowed" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  opacity: youtubeSearchStatus?.loading && youtubeSearchStatus?.song === spotifyTrack.song ? 0.7 : 1
+                }}
+              >
+                {youtubeSearchStatus?.loading && youtubeSearchStatus?.song === spotifyTrack.song ? (
+                  <>
+                    <span>Searching...</span>
+                    <span className="spinner" style={{
+                      width: "16px",
+                      height: "16px",
+                      border: "2px solid #fff",
+                      borderTop: "2px solid transparent",
+                      borderRadius: "50%",
+                      animation: "spin 1s linear infinite"
+                    }}></span>
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z"/>
+                    </svg>
+                    Play on YouTube
+                  </>
+                )}
+              </button>
             </div>
           </div>
         )}
@@ -673,6 +780,46 @@ function App() {
                     style={{ width: "50px", height: "50px", marginTop: "5px", borderRadius: "3px" }}
                   />
                 )}
+                {/* YouTube Play Button for Other Users */}
+                <button
+                  onClick={() => handlePlayOnYouTube(data.song, data.artist)}
+                  disabled={youtubeSearchStatus?.loading && youtubeSearchStatus?.song === data.song}
+                  style={{
+                    marginTop: "8px",
+                    padding: "6px 12px",
+                    backgroundColor: "#FF0000",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: youtubeSearchStatus?.loading && youtubeSearchStatus?.song === data.song ? "not-allowed" : "pointer",
+                    fontSize: "12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    opacity: youtubeSearchStatus?.loading && youtubeSearchStatus?.song === data.song ? 0.7 : 1
+                  }}
+                >
+                  {youtubeSearchStatus?.loading && youtubeSearchStatus?.song === data.song ? (
+                    <>
+                      <span className="spinner" style={{
+                        width: "12px",
+                        height: "12px",
+                        border: "2px solid #fff",
+                        borderTop: "2px solid transparent",
+                        borderRadius: "50%",
+                        animation: "spin 1s linear infinite"
+                      }}></span>
+                      Searching...
+                    </>
+                  ) : (
+                    <>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z"/>
+                      </svg>
+                      Play on YouTube
+                    </>
+                  )}
+                </button>
               </div>
             ))}
           </div>
@@ -691,6 +838,45 @@ function App() {
           Spotify: {spotifyConnected ? "Connected" : "Not Connected"}
         </div>
       </div>
+
+      {/* YouTube Search Status Message */}
+      {youtubeSearchStatus && (
+        <div style={{
+          position: "fixed",
+          top: "20px",
+          right: "20px",
+          padding: "15px",
+          backgroundColor: youtubeSearchStatus.success ? "#4CAF50" : youtubeSearchStatus.loading ? "#2196F3" : "#f44336",
+          color: "white",
+          borderRadius: "8px",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+          zIndex: 1000,
+          maxWidth: "300px",
+          animation: "slideIn 0.3s ease"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {youtubeSearchStatus.loading ? (
+              <span className="spinner" style={{
+                width: "20px",
+                height: "20px",
+                border: "3px solid #fff",
+                borderTop: "3px solid transparent",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite"
+              }}></span>
+            ) : youtubeSearchStatus.success ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+              </svg>
+            )}
+            <span>{youtubeSearchStatus.message || (youtubeSearchStatus.loading ? "Searching YouTube..." : "")}</span>
+          </div>
+        </div>
+      )}
 
       <p style={{ 
         marginTop: "20px", 
