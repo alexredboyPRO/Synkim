@@ -141,7 +141,7 @@ function App() {
       setBackgroundColor("#f0f0f0");
       setProfileLoaded(true);
     }
-  }, [db]);
+  }, []); // Removed `db` from dependencies
 
   const saveProfileSettings = useCallback(async () => {
     if (!user) return;
@@ -166,7 +166,7 @@ function App() {
       console.error("Error saving profile:", error);
       alert("Error saving profile. Please try again.");
     }
-  }, [user, username, backgroundColor, db]);
+  }, [user, username, backgroundColor]); // Removed `db` from dependencies
 
   // Auth functions
   const handleAuth = async (e) => {
@@ -249,7 +249,7 @@ function App() {
       }
     });
     return unsubscribe;
-  }, [auth, loadUserProfile]);
+  }, [loadUserProfile]); // Removed `auth` from dependencies
 
   // Socket setup
   useEffect(() => {
