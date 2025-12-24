@@ -143,30 +143,67 @@ function App() {
     }
   }, []); // Removed `db` from dependencies
 
-  const saveProfileSettings = useCallback(async () => {
-    if (!user) return;
-    
-    try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        username: username.trim(),
-        backgroundColor: backgroundColor,
-        updatedAt: new Date().toISOString()
-      });
+  const [isSaving, setIsSaving] = useState(false);
+const [profileSaveError, setProfileSaveError] = useState("");
 
-      if (socketRef.current && username.trim()) {
-        socketRef.current.emit("updateUsername", {
-          username: username.trim(),
-          userId: user.uid
-        });
-      }
-      
-      setShowProfileSettings(false);
-    } catch (error) {
-      console.error("Error saving profile:", error);
-      alert("Error saving profile. Please try again.");
+  const saveProfileSettings = useCallback(async () => {
+  if (!user) {
+    alert("You must be logged in to save profile settings.");
+    return;
+  }
+
+  const trimmedUsername = username.trim();
+  if (!trimmedUsername) {
+    alert("Username cannot be empty.");
+    return;
+  }
+
+  setIsSaving(true); // <<< Add a new state for loading
+  setProfileSaveError(""); // <<< Add a new state for error messages
+
+  try {
+    const userRef = doc(db, "users", user.uid);
+    await updateDoc(userRef, {
+      username: trimmedUsername,
+      backgroundColor: backgroundColor,
+      updatedAt: new Date().toISOString()
+    });
+
+    console.log("✅ Profile saved to Firestore");
+
+    // 1. Update local state immediately
+    setUsername(trimmedUsername);
+
+    // 2. Broadcast to other users in the room via WebSocket
+    if (socketRef.current) {
+      socketRef.current.emit("updateUsername", {
+        username: trimmedUsername,
+        userId: user.uid
+      });
+      console.log("📡 Username update broadcast via socket");
     }
-  }, [user, username, backgroundColor]); // Removed `db` from dependencies
+
+    // 3. Close modal and show success
+    setShowProfileSettings(false);
+    alert("Profile saved successfully!"); // Or use a more elegant toast notification
+
+  } catch (error) {
+    console.error("❌ Error saving profile:", error);
+    
+    // Provide specific feedback to the user[citation:4]
+    let errorMessage = "Failed to save profile. Please try again.";
+    if (error.code === 'permission-denied') {
+      errorMessage = "You don't have permission to update your profile. Please log out and back in.";
+    } else if (error.code === 'unavailable') {
+      errorMessage = "Network error. Please check your connection.";
+    }
+    
+    setProfileSaveError(errorMessage);
+    // Keep the modal open so user can try again
+  } finally {
+    setIsSaving(false);
+  }
+}, [user, username, backgroundColor]); // Dependencies are correct
 
   // Auth functions
   const handleAuth = async (e) => {
