@@ -56,6 +56,8 @@ function App() {
   const [username, setUsername] = useState("");
   const [backgroundColor, setBackgroundColor] = useState("#f0f0f0");
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [profileSaveError, setProfileSaveError] = useState("");
 
   // === ADD THIS NEW useEffect FOR POPUP MESSAGES ===
   useEffect(() => {
@@ -141,69 +143,66 @@ function App() {
       setBackgroundColor("#f0f0f0");
       setProfileLoaded(true);
     }
-  }, []); // Removed `db` from dependencies
-
-  const [isSaving, setIsSaving] = useState(false);
-const [profileSaveError, setProfileSaveError] = useState("");
+  }, []);
 
   const saveProfileSettings = useCallback(async () => {
-  if (!user) {
-    alert("You must be logged in to save profile settings.");
-    return;
-  }
+    if (!user) {
+      alert("You must be logged in to save profile settings.");
+      return;
+    }
 
-  const trimmedUsername = username.trim();
-  if (!trimmedUsername) {
-    alert("Username cannot be empty.");
-    return;
-  }
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername) {
+      alert("Username cannot be empty.");
+      return;
+    }
 
-  setIsSaving(true); // <<< Add a new state for loading
-  setProfileSaveError(""); // <<< Add a new state for error messages
+    setIsSaving(true);
+    setProfileSaveError("");
 
-  try {
-    const userRef = doc(db, "users", user.uid);
-    await updateDoc(userRef, {
-      username: trimmedUsername,
-      backgroundColor: backgroundColor,
-      updatedAt: new Date().toISOString()
-    });
-
-    console.log("✅ Profile saved to Firestore");
-
-    // 1. Update local state immediately
-    setUsername(trimmedUsername);
-
-    // 2. Broadcast to other users in the room via WebSocket
-    if (socketRef.current) {
-      socketRef.current.emit("updateUsername", {
+    try {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
         username: trimmedUsername,
-        userId: user.uid
+        backgroundColor: backgroundColor,
+        updatedAt: new Date().toISOString()
       });
-      console.log("📡 Username update broadcast via socket");
-    }
 
-    // 3. Close modal and show success
-    setShowProfileSettings(false);
-    alert("Profile saved successfully!"); // Or use a more elegant toast notification
+      console.log("✅ Profile saved to Firestore");
 
-  } catch (error) {
-    console.error("❌ Error saving profile:", error);
-    
-    // Provide specific feedback to the user[citation:4]
-    let errorMessage = "Failed to save profile. Please try again.";
-    if (error.code === 'permission-denied') {
-      errorMessage = "You don't have permission to update your profile. Please log out and back in.";
-    } else if (error.code === 'unavailable') {
-      errorMessage = "Network error. Please check your connection.";
+      // 1. Update local state immediately
+      setUsername(trimmedUsername);
+
+      // 2. Broadcast to other users in the room via WebSocket
+      if (socketRef.current) {
+        socketRef.current.emit("updateUsername", {
+          username: trimmedUsername,
+          userId: user.uid
+        });
+        console.log("📡 Username update broadcast via socket");
+      }
+
+      // 3. Close modal and show success
+      setShowProfileSettings(false);
+      alert("Profile saved successfully!");
+
+    } catch (error) {
+      console.error("❌ Error saving profile:", error);
+      
+      // Provide specific feedback to the user
+      let errorMessage = "Failed to save profile. Please try again.";
+      if (error.code === 'permission-denied') {
+        errorMessage = "You don't have permission to update your profile. Please log out and back in.";
+      } else if (error.code === 'unavailable') {
+        errorMessage = "Network error. Please check your connection.";
+      }
+      
+      setProfileSaveError(errorMessage);
+      // Keep the modal open so user can try again
+    } finally {
+      setIsSaving(false);
     }
-    
-    setProfileSaveError(errorMessage);
-    // Keep the modal open so user can try again
-  } finally {
-    setIsSaving(false);
-  }
-}, [user, username, backgroundColor]); // Dependencies are correct
+  }, [user, username, backgroundColor]);
 
   // Auth functions
   const handleAuth = async (e) => {
@@ -286,7 +285,7 @@ const [profileSaveError, setProfileSaveError] = useState("");
       }
     });
     return unsubscribe;
-  }, [loadUserProfile]); // Removed `auth` from dependencies
+  }, [loadUserProfile]);
 
   // Socket setup
   useEffect(() => {
@@ -1011,7 +1010,7 @@ const [profileSaveError, setProfileSaveError] = useState("");
         </div>
       )}
 
-      {/* Profile Settings Modal */}
+      {/* Profile Settings Modal - UPDATED SECTION */}
       {showProfileSettings && (
         <div style={{
           position: 'fixed',
@@ -1045,12 +1044,14 @@ const [profileSaveError, setProfileSaveError] = useState("");
               <h2 style={{ margin: 0, color: '#333' }}>Profile Settings</h2>
               <button
                 onClick={() => setShowProfileSettings(false)}
+                disabled={isSaving}
                 style={{
                   background: 'none',
                   border: 'none',
                   fontSize: '24px',
-                  cursor: 'pointer',
-                  color: '#666'
+                  cursor: isSaving ? 'not-allowed' : 'pointer',
+                  color: '#666',
+                  opacity: isSaving ? 0.5 : 1
                 }}
               >
                 ×
@@ -1066,13 +1067,15 @@ const [profileSaveError, setProfileSaveError] = useState("");
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Enter your username"
+                disabled={isSaving}
                 style={{
                   width: '100%',
                   padding: '12px',
                   fontSize: '16px',
                   borderRadius: '6px',
                   border: '1px solid #ddd',
-                  boxSizing: 'border-box'
+                  boxSizing: 'border-box',
+                  opacity: isSaving ? 0.7 : 1
                 }}
               />
               <p style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
@@ -1089,12 +1092,14 @@ const [profileSaveError, setProfileSaveError] = useState("");
                   type="color"
                   value={backgroundColor}
                   onChange={(e) => setBackgroundColor(e.target.value)}
+                  disabled={isSaving}
                   style={{
                     width: '60px',
                     height: '40px',
                     border: 'none',
-                    cursor: 'pointer',
-                    borderRadius: '4px'
+                    cursor: isSaving ? 'not-allowed' : 'pointer',
+                    borderRadius: '4px',
+                    opacity: isSaving ? 0.7 : 1
                   }}
                 />
                 <div style={{
@@ -1104,7 +1109,8 @@ const [profileSaveError, setProfileSaveError] = useState("");
                   borderRadius: '6px',
                   border: '1px solid #ddd',
                   backgroundColor: '#f8f9fa',
-                  fontFamily: 'monospace'
+                  fontFamily: 'monospace',
+                  opacity: isSaving ? 0.7 : 1
                 }}>
                   {backgroundColor}
                 </div>
@@ -1124,10 +1130,26 @@ const [profileSaveError, setProfileSaveError] = useState("");
                 Background Preview
               </div>
             </div>
+
+            {/* Show error message if exists */}
+            {profileSaveError && (
+              <div style={{
+                backgroundColor: '#ffe6e6',
+                color: '#d32f2f',
+                padding: '12px',
+                borderRadius: '6px',
+                marginBottom: '20px',
+                borderLeft: '4px solid #d32f2f',
+                fontSize: '14px'
+              }}>
+                <strong>Error:</strong> {profileSaveError}
+              </div>
+            )}
             
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', alignItems: 'center' }}>
               <button
                 onClick={() => setShowProfileSettings(false)}
+                disabled={isSaving}
                 style={{
                   padding: '10px 20px',
                   fontSize: '16px',
@@ -1135,24 +1157,44 @@ const [profileSaveError, setProfileSaveError] = useState("");
                   backgroundColor: '#6c757d',
                   color: 'white',
                   border: 'none',
-                  cursor: 'pointer'
+                  cursor: isSaving ? 'not-allowed' : 'pointer',
+                  opacity: isSaving ? 0.6 : 1
                 }}
               >
                 Cancel
               </button>
+              
               <button
                 onClick={saveProfileSettings}
+                disabled={isSaving}
                 style={{
                   padding: '10px 20px',
                   fontSize: '16px',
                   borderRadius: '6px',
-                  backgroundColor: '#007BFF',
+                  backgroundColor: isSaving ? '#4d7cac' : '#007BFF',
                   color: 'white',
                   border: 'none',
-                  cursor: 'pointer'
+                  cursor: isSaving ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  minWidth: '120px',
+                  justifyContent: 'center'
                 }}
               >
-                Save Changes
+                {isSaving ? (
+                  <>
+                    <span style={{
+                      width: '16px',
+                      height: '16px',
+                      border: '2px solid #fff',
+                      borderTop: '2px solid transparent',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite'
+                    }}></span>
+                    Saving...
+                  </>
+                ) : 'Save Changes'}
               </button>
             </div>
             
@@ -1162,14 +1204,16 @@ const [profileSaveError, setProfileSaveError] = useState("");
                 {['#f0f0f0', '#e3f2fd', '#f3e5f5', '#e8f5e9', '#fff3e0', '#fce4ec', '#e0f7fa', '#f1f8e9'].map((color) => (
                   <button
                     key={color}
-                    onClick={() => setBackgroundColor(color)}
+                    onClick={() => !isSaving && setBackgroundColor(color)}
+                    disabled={isSaving}
                     style={{
                       width: '40px',
                       height: '40px',
                       backgroundColor: color,
                       border: backgroundColor === color ? '3px solid #007BFF' : '2px solid #ddd',
                       borderRadius: '4px',
-                      cursor: 'pointer'
+                      cursor: isSaving ? 'not-allowed' : 'pointer',
+                      opacity: isSaving ? 0.5 : 1
                     }}
                     title={color}
                   />
