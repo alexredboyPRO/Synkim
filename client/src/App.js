@@ -32,7 +32,6 @@ function App() {
   const socketRef = useRef(null);
   const playerRef = useRef(null);
   const isRemoteAction = useRef(false);
-  const usernameRef = useRef("");
   const [videoId, setVideoId] = useState("dQw4w9WgXcQ");
   const [inputUrl, setInputUrl] = useState("");
   const [isPlaylist, setIsPlaylist] = useState(false);
@@ -114,24 +113,22 @@ function App() {
   }
 
   // === PROFILE FUNCTIONS ===
-  const loadUserProfile = useCallback(async (userId) => {
+  const loadUserProfile = useCallback(async (userId, userEmail) => {
     try {
       const userRef = doc(db, "users", userId);
       const userSnap = await getDoc(userRef);
       
       if (userSnap.exists()) {
         const userData = userSnap.data();
-        setUsername(userData.username || user.email.split('@')[0]);
+        setUsername(userData.username || userEmail.split('@')[0]);
         setBackgroundColor(userData.backgroundColor || "#f0f0f0");
-        usernameRef.current = userData.username || user.email.split('@')[0];
       } else {
-        const defaultUsername = user.email.split('@')[0];
+        const defaultUsername = userEmail.split('@')[0];
         setUsername(defaultUsername);
         setBackgroundColor("#f0f0f0");
-        usernameRef.current = defaultUsername;
         
         await setDoc(doc(db, "users", userId), {
-          email: user.email,
+          email: userEmail,
           username: defaultUsername,
           backgroundColor: "#f0f0f0",
           createdAt: new Date().toISOString()
@@ -140,14 +137,13 @@ function App() {
       setProfileLoaded(true);
     } catch (error) {
       console.error("Error loading profile:", error);
-      setUsername(user.email.split('@')[0]);
+      setUsername(userEmail.split('@')[0]);
       setBackgroundColor("#f0f0f0");
-      usernameRef.current = user.email.split('@')[0];
       setProfileLoaded(true);
     }
-  }, [db, user]);
+  }, [db]);
 
-  const saveProfileSettings = async () => {
+  const saveProfileSettings = useCallback(async () => {
     if (!user) return;
     
     try {
@@ -158,10 +154,7 @@ function App() {
         updatedAt: new Date().toISOString()
       });
 
-      usernameRef.current = username.trim();
-      
-      // Send updated username to socket server
-      if (socketRef.current && socketRef.current.connected && username.trim()) {
+      if (socketRef.current && username.trim()) {
         socketRef.current.emit("updateUsername", {
           username: username.trim(),
           userId: user.uid
@@ -173,7 +166,7 @@ function App() {
       console.error("Error saving profile:", error);
       alert("Error saving profile. Please try again.");
     }
-  };
+  }, [user, username, backgroundColor, db]);
 
   // Auth functions
   const handleAuth = async (e) => {
@@ -195,16 +188,13 @@ function App() {
     try {
       await signOut(auth);
       setProfileLoaded(false);
-      setUsername("");
-      usernameRef.current = "";
-      setBackgroundColor("#f0f0f0");
     } catch (error) {
       console.error("Logout error:", error);
     }
   };
 
   // Spotify connect function
-  const handleSpotifyConnect = () => {
+  const handleSpotifyConnect = useCallback(() => {
     console.log("Spotify connect button clicked");
     console.log("Socket exists?", !!socketRef.current);
     console.log("Socket connected?", socketRef.current?.connected);
@@ -219,9 +209,9 @@ function App() {
     } else {
       console.log("No socket connection available");
     }
-  };
+  }, [spotifyConnected]);
 
-  const handlePlayOnYouTube = (song, artist, durationMs = null) => {
+  const handlePlayOnYouTube = useCallback((song, artist, durationMs = null) => {
     if (!socketRef.current) {
       alert("Not connected to server");
       return;
@@ -243,39 +233,23 @@ function App() {
       timestamp: Date.now(),
       userId: user?.uid || 'anonymous'
     });
-  };
+  }, [user]);
 
   // Listen to auth state changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      if (user) {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
         setAuthError("");
-        await loadUserProfile(user.uid);
+        await loadUserProfile(currentUser.uid, currentUser.email);
       } else {
         setProfileLoaded(false);
         setUsername("");
-        usernameRef.current = "";
         setBackgroundColor("#f0f0f0");
       }
     });
     return unsubscribe;
   }, [auth, loadUserProfile]);
-
-  // Update username ref when username changes
-  useEffect(() => {
-    usernameRef.current = username;
-  }, [username]);
-
-  // Send username to socket server when connected
-  useEffect(() => {
-    if (socketRef.current?.connected && user && username) {
-      socketRef.current.emit("updateUsername", {
-        username: username,
-        userId: user.uid
-      });
-    }
-  }, [user, username, socketRef.current?.connected]);
 
   // Socket setup
   useEffect(() => {
@@ -291,10 +265,9 @@ function App() {
     socketRef.current.on("connect", () => {
       console.log("Socket connected with ID:", socketRef.current.id);
       
-      // Send username to backend
-      if (user && usernameRef.current) {
+      if (user && username) {
         socketRef.current.emit("updateUsername", {
-          username: usernameRef.current,
+          username: username,
           userId: user.uid
         });
       }
@@ -435,7 +408,7 @@ function App() {
         console.log("Socket disconnected");
       }
     };
-  }, [user]);
+  }, [user, username]);
 
   // Periodically check Spotify status
   useEffect(() => {
@@ -447,9 +420,9 @@ function App() {
     }, 15000);
     
     return () => clearInterval(interval);
-  }, [spotifyConnected, socketRef.current]);
+  }, [spotifyConnected]);
 
-  const onReady = (event) => {
+  const onReady = useCallback((event) => {
     playerRef.current = event.target;
     console.log("YouTube player ready");
 
@@ -461,23 +434,23 @@ function App() {
     }, 3000);
     
     return () => clearInterval(syncInterval);
-  };
+  }, []);
 
-  const onPlay = () => {
+  const onPlay = useCallback(() => {
     if (!isRemoteAction.current && playerRef.current) {
       const t = playerRef.current.getCurrentTime();
       socketRef.current.emit("play", t);
     }
-  };
+  }, []);
 
-  const onPause = () => {
+  const onPause = useCallback(() => {
     if (!isRemoteAction.current && playerRef.current) {
       const t = playerRef.current.getCurrentTime();
       socketRef.current.emit("pause", t);
     }
-  };
+  }, []);
 
-  const handleVideoChange = () => {
+  const handleVideoChange = useCallback(() => {
     const result = extractYouTubeId(inputUrl);
     if (result) {
       if (result.type === "playlist") {
@@ -493,10 +466,10 @@ function App() {
     } else {
       alert("Invalid YouTube link.");
     }
-  };
+  }, [inputUrl]);
 
   // Responsive YouTube player options
-  const getPlayerOpts = () => {
+  const getPlayerOpts = useCallback(() => {
     const screenWidth = window.innerWidth;
     let width, height;
     
@@ -519,7 +492,7 @@ function App() {
         ...(isPlaylist && { list: videoId, listType: 'playlist' })
       },
     };
-  };
+  }, [isPlaylist, videoId]);
 
   // Auth Form
   if (!user) {
@@ -740,7 +713,7 @@ function App() {
                 color: 'white',
                 border: 'none',
                 cursor: 'pointer'
-              }}
+            }}
             >
               Logout
             </button>
