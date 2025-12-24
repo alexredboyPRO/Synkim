@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import YouTube from "react-youtube";
 import io from "socket.io-client";
 import { initializeApp } from "firebase/app";
@@ -32,6 +32,7 @@ function App() {
   const socketRef = useRef(null);
   const playerRef = useRef(null);
   const isRemoteAction = useRef(false);
+  const usernameRef = useRef("");
   const [videoId, setVideoId] = useState("dQw4w9WgXcQ");
   const [inputUrl, setInputUrl] = useState("");
   const [isPlaylist, setIsPlaylist] = useState(false);
@@ -113,7 +114,7 @@ function App() {
   }
 
   // === PROFILE FUNCTIONS ===
-  const loadUserProfile = async (userId) => {
+  const loadUserProfile = useCallback(async (userId) => {
     try {
       const userRef = doc(db, "users", userId);
       const userSnap = await getDoc(userRef);
@@ -122,10 +123,12 @@ function App() {
         const userData = userSnap.data();
         setUsername(userData.username || user.email.split('@')[0]);
         setBackgroundColor(userData.backgroundColor || "#f0f0f0");
+        usernameRef.current = userData.username || user.email.split('@')[0];
       } else {
         const defaultUsername = user.email.split('@')[0];
         setUsername(defaultUsername);
         setBackgroundColor("#f0f0f0");
+        usernameRef.current = defaultUsername;
         
         await setDoc(doc(db, "users", userId), {
           email: user.email,
@@ -139,9 +142,10 @@ function App() {
       console.error("Error loading profile:", error);
       setUsername(user.email.split('@')[0]);
       setBackgroundColor("#f0f0f0");
+      usernameRef.current = user.email.split('@')[0];
       setProfileLoaded(true);
     }
-  };
+  }, [db, user]);
 
   const saveProfileSettings = async () => {
     if (!user) return;
@@ -154,8 +158,10 @@ function App() {
         updatedAt: new Date().toISOString()
       });
 
+      usernameRef.current = username.trim();
+      
       // Send updated username to socket server
-      if (socketRef.current && username.trim()) {
+      if (socketRef.current && socketRef.current.connected && username.trim()) {
         socketRef.current.emit("updateUsername", {
           username: username.trim(),
           userId: user.uid
@@ -189,6 +195,9 @@ function App() {
     try {
       await signOut(auth);
       setProfileLoaded(false);
+      setUsername("");
+      usernameRef.current = "";
+      setBackgroundColor("#f0f0f0");
     } catch (error) {
       console.error("Logout error:", error);
     }
@@ -246,11 +255,27 @@ function App() {
       } else {
         setProfileLoaded(false);
         setUsername("");
+        usernameRef.current = "";
         setBackgroundColor("#f0f0f0");
       }
     });
     return unsubscribe;
-  }, []);
+  }, [auth, loadUserProfile]);
+
+  // Update username ref when username changes
+  useEffect(() => {
+    usernameRef.current = username;
+  }, [username]);
+
+  // Send username to socket server when connected
+  useEffect(() => {
+    if (socketRef.current?.connected && user && username) {
+      socketRef.current.emit("updateUsername", {
+        username: username,
+        userId: user.uid
+      });
+    }
+  }, [user, username, socketRef.current?.connected]);
 
   // Socket setup
   useEffect(() => {
@@ -267,9 +292,9 @@ function App() {
       console.log("Socket connected with ID:", socketRef.current.id);
       
       // Send username to backend
-      if (user && username) {
+      if (user && usernameRef.current) {
         socketRef.current.emit("updateUsername", {
-          username: username,
+          username: usernameRef.current,
           userId: user.uid
         });
       }
@@ -422,7 +447,7 @@ function App() {
     }, 15000);
     
     return () => clearInterval(interval);
-  }, [spotifyConnected]);
+  }, [spotifyConnected, socketRef.current]);
 
   const onReady = (event) => {
     playerRef.current = event.target;
